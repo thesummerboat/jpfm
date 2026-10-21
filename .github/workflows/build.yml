@@ -3,6 +3,9 @@ name: Bygg APK
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "server/**"
+      - ".github/workflows/server.yml"
   workflow_dispatch:
 
 permissions:

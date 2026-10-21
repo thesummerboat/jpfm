@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>jpfm-server</Name>
+  <Repository>ghcr.io/thesummerboat/jpfm-server:latest</Repository>
+  <Registry>https://github.com/thesummerboat/jpfm/pkgs/container/jpfm-server</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/thesummerboat/jpfm</Support>
+  <Project>https://github.com/thesummerboat/jpfm</Project>
+  <Overview>Önskningar och godkännanden för musikappen JPFM. Tar emot önskningar från JPFM (inloggning med Plex), låter ägaren godkänna eller neka och skickar godkända önskningar till Lidarr.</Overview>
+  <Category>MediaServer:Music Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8687]/api/health</WebUI>
+  <Icon>https://raw.githubusercontent.com/thesummerboat/jpfm/main/docs/icon.png</Icon>
+  <Config Name="Port" Target="8687" Default="8687" Mode="tcp" Description="Porten JPFM-appen ansluter till" Type="Port" Display="always" Required="true" Mask="false">8687</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/jpfm-server" Mode="rw" Description="Databas med önskningar och inställningar" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/jpfm-server</Config>
+</Container>
