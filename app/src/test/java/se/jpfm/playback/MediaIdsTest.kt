@@ -50,4 +50,19 @@ class MediaIdsTest {
         assertEquals("#", MediaIds.letterOf("2Pac"))
         assertEquals("#", MediaIds.letterOf(""))
     }
+
+    @Test
+    fun mixIdsRoundTripWithFilterAndTitle() {
+        val id = MediaIds.playMix("album.genre=12", "Rock | Pop")
+        val p = MediaIds.parse(id)
+        assertEquals("play-mix", p.type)
+        assertEquals("album.genre=12|Rock | Pop", p.value)
+    }
+
+    @Test
+    fun hotListIds() {
+        val p = MediaIds.parse(MediaIds.playHot("se"))
+        assertEquals("play-hot", p.type)
+        assertEquals("se", p.value)
+    }
 }

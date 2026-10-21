@@ -66,6 +66,7 @@ import se.jpfm.plex.Artist
 import se.jpfm.plex.Genre
 import se.jpfm.ui.AlbumCard
 import se.jpfm.ui.AppViewModel
+import se.jpfm.ui.CategoryTile
 import se.jpfm.ui.Artwork
 import se.jpfm.ui.EmptyBox
 import se.jpfm.ui.Format
@@ -338,11 +339,6 @@ private fun PlaylistsTab(vm: AppViewModel) {
 
 // ---------- Genrer ----------
 
-private val genreColors = listOf(
-    Color(0xFF1FA67F), Color(0xFF7B5CFF), Color(0xFFE5577A), Color(0xFFF0A23B), Color(0xFF2BB3D9),
-    Color(0xFF8BC34A), Color(0xFFB0549E), Color(0xFF3F7DE8), Color(0xFFE0663C), Color(0xFF16A2A2),
-)
-
 @Composable
 private fun GenresTab(vm: AppViewModel) {
     val g = LocalGraph.current
@@ -356,23 +352,9 @@ private fun GenresTab(vm: AppViewModel) {
             modifier = Modifier.fillMaxSize(),
         ) {
             items(list.size) { i ->
-                GenreTile(list[i], genreColors[i % genreColors.size]) { vm.nav.push(Screen.GenreAlbums(list[i])) }
+                CategoryTile(list[i].title, se.jpfm.ui.categoryColor(list[i].title), onClick = { vm.nav.push(Screen.Category(se.jpfm.plex.Mix.genre(list[i]))) }, modifier = Modifier.fillMaxWidth())
             }
         }
     }
 }
 
-@Composable
-private fun GenreTile(genre: Genre, color: Color, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(84.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(Brush.linearGradient(listOf(color, color.copy(alpha = 0.55f))))
-            .clickable(onClick = onClick)
-            .padding(14.dp),
-    ) {
-        Text(genre.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
-    }
-}

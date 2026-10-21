@@ -282,7 +282,7 @@ fun StationLogo(s: RadioStation, size: Dp, corner: Dp = 12.dp) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun StationTile(vm: AppViewModel, s: RadioStation, onPlay: () -> Unit) {
+fun StationTile(vm: AppViewModel, s: RadioStation, onPlay: () -> Unit) {
     val playing = vm.player.nowStation?.id == s.id
     Column(
         Modifier
@@ -443,7 +443,7 @@ private fun LazyListScope.podcastSection(title: String, key: String, state: Load
 }
 
 @Composable
-private fun PodcastCards(vm: AppViewModel, list: List<Podcast>) {
+fun PodcastCards(vm: AppViewModel, list: List<Podcast>) {
     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         items(list, key = { it.id }) { p ->
             Column(

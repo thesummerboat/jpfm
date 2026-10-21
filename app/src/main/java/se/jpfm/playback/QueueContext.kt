@@ -10,15 +10,15 @@ import org.json.JSONObject
 data class QueueContext(
     val kind: Kind,
     val title: String,
-    /** Albumets, spellistans eller artistens nyckel. */
+    /** Albumets, spellistans eller artistens nyckel (för mixar: låtfiltret). */
     val id: String? = null,
     /** Spelkön på servern för Plex radio och mixar. */
     val playQueueId: Long? = null,
 ) {
-    enum class Kind { ALBUM, PLAYLIST, ARTIST, STATION, SONIC_RADIO, SHUFFLE_LIBRARY, TRACKS, DOWNLOADS, LIVE, PODCAST }
+    enum class Kind { ALBUM, PLAYLIST, ARTIST, STATION, SONIC_RADIO, SHUFFLE_LIBRARY, TRACKS, DOWNLOADS, LIVE, PODCAST, MIX }
 
     /** Fylls på av sig själv när den börjar ta slut. */
-    val endless: Boolean get() = kind == Kind.STATION || kind == Kind.SONIC_RADIO || kind == Kind.SHUFFLE_LIBRARY
+    val endless: Boolean get() = kind == Kind.STATION || kind == Kind.SONIC_RADIO || kind == Kind.SHUFFLE_LIBRARY || kind == Kind.MIX
 
     fun toBundle(): Bundle = Bundle().apply {
         putString(K_KIND, kind.name)

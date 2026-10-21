@@ -31,6 +31,10 @@ object MediaIds {
     fun playAlbum(key: String) = "play:album:$key"
     fun playPlaylist(key: String) = "play:playlist:$key"
     fun playOffline(collectionId: String) = "play:offline:${enc(collectionId)}"
+    /** En mix: låtfilter och titel, t.ex. "play:mix:album.genre%3D12%7CRock". */
+    fun playMix(trackFilter: String, title: String) = "play:mix:${enc("$trackFilter|$title")}"
+    /** Topplistor: "se" (Sverige) eller "me" (det du spelat mest). */
+    fun playHot(which: String) = "play:hot:$which"
 
     /** En låt, eventuellt i ett sammanhang: "track:123@album:45". */
     fun track(ratingKey: String, context: String? = null) =
@@ -45,7 +49,7 @@ object MediaIds {
             val rest = id.removePrefix("play:")
             val type = rest.substringBefore(':')
             val value = rest.substringAfter(':', "")
-            return Id("play-$type", if (type == "offline") dec(value) else value)
+            return Id("play-$type", if (type == "offline" || type == "mix") dec(value) else value)
         }
         val type = id.substringBefore(':')
         val rest = id.substringAfter(':', "")

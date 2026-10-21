@@ -6,7 +6,6 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
-import se.jpfm.plex.Genre
 import se.jpfm.plex.Hub
 
 sealed interface Screen {
@@ -20,7 +19,12 @@ sealed interface Screen {
     data class Artist(val key: String, val title: String) : Screen
     data class Album(val key: String, val title: String) : Screen
     data class Playlist(val key: String, val title: String) : Screen
-    data class GenreAlbums(val genre: Genre) : Screen
+    /** En genre, stämning eller ett årtionde: spela mixen eller bläddra bland albumen. */
+    data class Category(val mix: se.jpfm.plex.Mix) : Screen
+    /** Alla genrer, stämningar och årtionden. */
+    data object Browse : Screen
+    /** Topplista: "se" (Sverige) eller "me" (det du spelat mest). */
+    data class HotList(val which: String) : Screen
     data class HubItems(val hub: Hub) : Screen
     data class Offline(val id: String, val title: String) : Screen
 }

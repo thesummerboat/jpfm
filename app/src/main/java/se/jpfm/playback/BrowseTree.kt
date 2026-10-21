@@ -12,6 +12,7 @@ import se.jpfm.plex.MusicItem
 import se.jpfm.plex.Playlist
 import se.jpfm.plex.Station
 import se.jpfm.plex.Track
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Bläddringsträdet i Android Auto. Fyra flikar: Hem, Spellistor, Artister och Nedladdat.
@@ -83,6 +84,16 @@ class BrowseTree(private val g: AppGraph) {
         if (!online()) return downloads()
         val out = mutableListOf<MediaItem>()
         out += playable(MediaIds.SHUFFLE_ALL, "Blanda hela biblioteket", "Slumpvis från all din musik", icon(R.drawable.ic_auto_shuffle), MediaMetadata.MEDIA_TYPE_PLAYLIST, group = "Starta")
+        // Dina mixar: tar aldrig slut, perfekt i bilen.
+        val mixes = withTimeoutOrNull(5_000) { runCatching { g.library.mixes() }.getOrNull() }.orEmpty()
+        mixes.take(6).forEach { m ->
+            out += playable(
+                MediaIds.playMix(m.trackFilter, m.title), m.title, m.subtitle ?: "Mix som fylls på av sig själv",
+                m.thumb?.let { art(it) } ?: icon(R.drawable.ic_auto_mix), MediaMetadata.MEDIA_TYPE_PLAYLIST, group = "Dina mixar",
+            )
+        }
+        out += playable(MediaIds.playHot(QueueBuilder.HOT_ME), "Hett hos dig", "Det du spelat mest senaste månaden", icon(R.drawable.ic_auto_hot), MediaMetadata.MEDIA_TYPE_PLAYLIST, group = "Topplistor")
+        out += playable(MediaIds.playHot(QueueBuilder.HOT_SWEDEN), "Hett i Sverige", "Topplistan – låtarna som finns hos dig", icon(R.drawable.ic_auto_hot), MediaMetadata.MEDIA_TYPE_PLAYLIST, group = "Topplistor")
         val list = runCatching { g.library.homeHubs() }.getOrDefault(emptyList())
         hubs = list
         list.forEachIndexed { i, hub ->

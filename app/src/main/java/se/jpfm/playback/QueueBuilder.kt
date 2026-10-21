@@ -6,6 +6,7 @@ import androidx.media3.common.MediaMetadata
 import se.jpfm.AppGraph
 import se.jpfm.plex.Album
 import se.jpfm.plex.Artist
+import se.jpfm.plex.Mix
 import se.jpfm.plex.Playlist
 import se.jpfm.plex.Station
 import se.jpfm.plex.Track
@@ -111,6 +112,27 @@ class QueueBuilder(private val g: AppGraph) {
         return BuiltQueue(tracks, 0, QueueContext(QueueContext.Kind.SHUFFLE_LIBRARY, "Hela biblioteket blandat"))
     }
 
+    /** En mix (genre, stämning, årtionde, favoriter) som fylls på av sig själv. */
+    suspend fun mix(m: Mix): BuiltQueue = mix(m.trackFilter, m.title)
+
+    suspend fun mix(trackFilter: String, title: String): BuiltQueue {
+        if (!online()) throw IOException("Mixar behöver kontakt med servern")
+        val tracks = library.randomTracksWhere(trackFilter, 80)
+        if (tracks.isEmpty()) throw IOException("Hittade inga låtar för $title")
+        return BuiltQueue(tracks, 0, QueueContext(QueueContext.Kind.MIX, title, trackFilter))
+    }
+
+    /** Topplistor: det som är hett i Sverige (och finns hos dig) eller det du spelat mest. */
+    suspend fun hot(which: String, start: Int = 0): BuiltQueue {
+        if (!online()) throw IOException("Topplistan behöver kontakt med servern")
+        val (title, tracks) = when (which) {
+            HOT_SWEDEN -> "Hett i Sverige" to library.matchChart(g.charts.sweden()).map { it.track }
+            else -> "Hett hos dig" to library.hotForYou()
+        }
+        if (tracks.isEmpty()) throw IOException("Inga låtar på topplistan ännu")
+        return BuiltQueue(tracks, start.coerceIn(0, tracks.size - 1), QueueContext(QueueContext.Kind.TRACKS, title))
+    }
+
     fun offline(collectionId: String, startTrackKey: String?, shuffle: Boolean): BuiltQueue {
         val (title, tracks) = if (collectionId == ALL_OFFLINE) {
             "Nedladdat" to downloads.allTracks()
@@ -207,6 +229,8 @@ class QueueBuilder(private val g: AppGraph) {
             "live" -> liveFromId(p.value)
             "ep" -> g.podcasts.episode("ep:${p.value}")?.let { episode(it) }
             "shuffle" -> shuffleLibrary()
+            "play-mix" -> mix(p.value.substringBefore('|'), p.value.substringAfter('|', "Mix"))
+            "play-hot" -> hot(p.value)
             else -> null
         }
     }
@@ -299,6 +323,14 @@ class QueueBuilder(private val g: AppGraph) {
             }
             QueueContext.Kind.SHUFFLE_LIBRARY ->
                 return library.randomTracks(60).filter { it.ratingKey !in have }
+            QueueContext.Kind.MIX -> {
+                val filter = ctx.id ?: return emptyList()
+                val fresh = library.randomTracksWhere(filter, 60)
+                val unseen = fresh.filter { it.ratingKey !in have }
+                // En liten genre tar slut: börja om, men inte med det som just spelats.
+                val recent = existing.takeLast(25).map { it.ratingKey }.toHashSet()
+                return unseen.ifEmpty { fresh.filter { it.ratingKey !in recent } }
+            }
             else -> Unit
         }
         // Låtradio (och reserv för stationer): liknande låtar som de senaste.
@@ -315,6 +347,8 @@ class QueueBuilder(private val g: AppGraph) {
         const val LIST_FAVORITES = "fav"
         const val LIST_SR = "sr"
         const val LIST_SWEDEN = "se"
+        const val HOT_SWEDEN = "se"
+        const val HOT_ME = "me"
         private const val EXTRA_FOCUS = "android.intent.extra.focus"
         private const val EXTRA_ARTIST = "android.intent.extra.artist"
         private const val EXTRA_ALBUM = "android.intent.extra.album"

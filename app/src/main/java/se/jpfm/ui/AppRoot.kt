@@ -54,7 +54,6 @@ import se.jpfm.ui.screens.AlbumScreen
 import se.jpfm.ui.screens.ArtistScreen
 import se.jpfm.ui.screens.ConnectingScreen
 import se.jpfm.ui.screens.DownloadsScreen
-import se.jpfm.ui.screens.GenreScreen
 import se.jpfm.ui.screens.HomeScreen
 import se.jpfm.ui.screens.HubScreen
 import se.jpfm.ui.screens.LibraryScreen
@@ -160,7 +159,9 @@ private fun ScreenContent(vm: AppViewModel, screen: Screen) {
         is Screen.Artist -> ArtistScreen(vm, screen.key, screen.title)
         is Screen.Album -> AlbumScreen(vm, screen.key, screen.title)
         is Screen.Playlist -> PlaylistScreen(vm, screen.key, screen.title)
-        is Screen.GenreAlbums -> GenreScreen(vm, screen.genre)
+        is Screen.Category -> se.jpfm.ui.screens.CategoryScreen(vm, screen.mix)
+        Screen.Browse -> se.jpfm.ui.screens.BrowseScreen(vm)
+        is Screen.HotList -> se.jpfm.ui.screens.HotListScreen(vm, screen.which)
         is Screen.HubItems -> HubScreen(vm, screen.hub)
         is Screen.Offline -> OfflineScreen(vm, screen.id, screen.title)
     }

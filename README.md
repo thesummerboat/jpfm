@@ -10,7 +10,8 @@ Syskonapp till [JPTV](https://github.com/thesummerboat/jptv).
 | --- | --- |
 | Inloggning | "Logga in med Plex" öppnar webbläsaren, eller skriv koden på [plex.tv/link](https://plex.tv/link). Servern hittas automatiskt, lokal adress först. |
 | Byter nät själv | Appen minns alla serverns adresser. Går du från wifi hemma till mobildata i bilen letar den upp fjärradressen och musiken fortsätter. |
-| Hem | Hälsning, snabbknappar (Blanda allt, Bibliotek, Nedladdat) och Plex egna rader: radiostationer, mixar, senast spelat, nyligen tillagt m.m. |
+| Hem | Filter överst (**Allt · Musik · Radio · Poddar**). Snabbval med det du spelat senast, radio, **Dina mixar** (en per genre du lyssnar mest på + dina favoriter), **Hett hos dig** (mest spelat senaste månaden, från Plex historik), nya poddavsnitt, **Hett i Sverige just nu** (topplistan – låtarna som finns i ditt bibliotek), nya släpp, Plex egna rader, **Återupptäck** och **Bläddra** bland genrer, stämningar och årtionden. |
+| Mixar och kategorier | Varje genre, stämning (energiskt, fest, lugnt, melankoliskt …) och årtionde har en egen sida med albumen (mest spelade först) och en mix som blandar och fyller på av sig själv. |
 | Bibliotek | Artister med bokstavslist vid kanten, album i rutnät med sortering (titel, artist, nyast tillagda, år), spellistor och genrer. |
 | Artist | Stor bild, artistradio, blanda, populära låtar, album uppdelade i album/singlar och EP/live/samlingar, liknande artister och biografi. |
 | Album och spellista | Färger från omslaget (Plex UltraBlur eller räknat från bilden), skivor, spela/blanda, ladda ner. |
@@ -20,7 +21,7 @@ Syskonapp till [JPTV](https://github.com/thesummerboat/jptv).
 | Radio | Plex stationer och mixar, artistradio och **låtradio** från vilken låt som helst med Plex soniska analys. Radion fylls på av sig själv och tar aldrig slut. |
 | Ljud | Direktuppspelning av originalfilen utan glapp mellan låtar. Ljudutjämning med Plex ljudanalys (automatiskt per album eller per låt). Klarar telefonen inte filen kodar Plex om den automatiskt. Valfri lägre kvalitet på mobildata. |
 | Offline | Ladda ner album och spellistor i originalkvalitet (bara på wifi om du vill). Omslag och ljudnivåer sparas också, så allt fungerar utan nät – även i bilen. |
-| Android Auto | Hem (stationer och mixar direkt), Spellistor, Artister (A–Ö) och Nedladdat, sök i bilen och röststyrning: "Spela Kent på JPFM". Gilla och låtradio som knappar i bilen. |
+| Android Auto | Hem (Dina mixar, topplistorna, stationer och Plex mixar direkt), Spellistor, Artister (A–Ö) och Nedladdat, sök i bilen och röststyrning: "Spela Kent på JPFM". Gilla och låtradio som knappar i bilen. |
 | Fortsätt där du var | Kön sparas, så musiken kan fortsätta efter omstart, från hörlurarna eller när bilen startar. |
 | Plex vet vad som spelas | Spelas nu, senast spelat och antal spelningar uppdateras i Plex, och gillade låtar sparas där. |
 
@@ -57,6 +58,7 @@ Alla versioner signeras med samma nyckel, annars vägrar Android installera uppd
 Kotlin · Jetpack Compose (Material 3) · Media3 (ExoPlayer, MediaLibraryService, nedladdning) · OkHttp · Coil · Palette. Plex-API enligt [developer.plex.tv](https://developer.plex.tv).
 
 - `plex/` – inloggning, serverval med omförsök, musik-API och tolkning av svaren
+- `charts/` – topplistan för Sverige (Apple Musics publika lista, utan konto)
 - `playback/` – spelartjänsten, köer och radio, Android Auto-trädet, ljudutjämning, omslag till bilen
 - `download/` – nedladdning för offline
 - `lyrics/` – låttext (LRC, Plex JSON/XML)

@@ -140,36 +140,6 @@ fun PlaylistScreen(vm: AppViewModel, key: String, title: String) {
 
 // ---------- Genre ----------
 
-@Composable
-fun GenreScreen(vm: AppViewModel, genre: se.jpfm.plex.Genre) {
-    val g = LocalGraph.current
-    val albums = rememberLoadable("genre", genre.id) { g.library.albumsInGenre(genre) }
-    GridPage(genre.title, onBack = { vm.nav.back() }) {
-        LoadContent(albums) { list ->
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(150.dp),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    PlayRow(
-                        onPlay = { vm.playLoaded("Genre: ${genre.title}") { vm.graph.library.randomTracksInGenre(genre) } },
-                        onShuffle = null,
-                        playLabel = "Blanda ${genre.title}",
-                        playIcon = Icons.Rounded.Shuffle,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                    )
-                }
-                itemsIndexed(list, key = { _, a -> a.ratingKey }) { _, a ->
-                    AlbumCard(a, onClick = { vm.nav.push(Screen.Album(a.ratingKey, a.title)) }, onLongClick = { vm.menu = MenuTarget.ForAlbum(a) }, width = 400.dp)
-                }
-            }
-        }
-    }
-}
-
 // ---------- En hel rad från hemskärmen ----------
 
 @Composable

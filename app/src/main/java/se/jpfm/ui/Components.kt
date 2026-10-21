@@ -102,15 +102,28 @@ class Loadable<T>(initial: Load<T>) {
     }
 }
 
-/** Hämtar data när skärmen visas och när [key] ändras. Behåller gamla data medan nya laddas. */
+/** Senast hämtade data för rader som ska synas direkt när man kommer tillbaka (hemskärmen). */
+private val kept = java.util.concurrent.ConcurrentHashMap<String, Any>()
+
+/**
+ * Hämtar data när skärmen visas och när [keys] ändras. Behåller gamla data medan nya laddas.
+ * Med [keep] visas det som hämtades förra gången direkt, medan nytt hämtas i bakgrunden – så
+ * att listan inte hoppar när man går tillbaka till den.
+ */
 @Composable
-fun <T> rememberLoadable(vararg keys: Any?, load: suspend (force: Boolean) -> T): Loadable<T> {
-    val l = remember(*keys) { Loadable<T>(Load.Loading) }
+fun <T> rememberLoadable(vararg keys: Any?, keep: String? = null, load: suspend (force: Boolean) -> T): Loadable<T> {
+    val l = remember(*keys, keep) {
+        @Suppress("UNCHECKED_CAST")
+        val old = keep?.let { kept[it] } as T?
+        Loadable<T>(if (old != null) Load.Ready(old) else Load.Loading)
+    }
     LaunchedEffect(l, l.trigger) {
         val force = l.force
         l.force = false
         try {
-            l.state = Load.Ready(load(force))
+            val v = load(force)
+            l.state = Load.Ready(v)
+            if (keep != null && v != null) kept[keep] = v
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             if (l.state !is Load.Ready) l.state = Load.Failed(e.message ?: "Något gick fel")
@@ -171,12 +184,23 @@ fun EmptyBox(icon: ImageVector, title: String, text: String, modifier: Modifier 
 // ---------- Rubriker och knappar ----------
 
 @Composable
-fun SectionHeader(title: String, modifier: Modifier = Modifier, action: String? = null, onAction: (() -> Unit)? = null) {
+fun SectionHeader(
+    title: String,
+    modifier: Modifier = Modifier,
+    action: String? = null,
+    subtitle: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
     Row(
         modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 26.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (subtitle != null) {
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Jp.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
         if (action != null && onAction != null) {
             TextButton(onClick = onAction) { Text(action, color = Jp.TextDim, style = MaterialTheme.typography.labelLarge) }
         }

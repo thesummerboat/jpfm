@@ -91,6 +91,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun shuffleLibrary() = launchQueue { graph.queues.shuffleLibrary() }
 
+    /** En mix (genre, stämning, årtionde, favoriter) som fylls på av sig själv. */
+    fun playMix(mix: se.jpfm.plex.Mix) = launchQueue("Kunde inte starta mixen") { graph.queues.mix(mix) }
+
     fun playTracks(tracks: List<Track>, index: Int, title: String, shuffle: Boolean = false) =
         launchQueue { graph.queues.tracks(tracks, index, title, shuffle) }
 
