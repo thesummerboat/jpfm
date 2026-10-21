@@ -207,6 +207,37 @@ class Downloads(private val app: JpfmApp, private val scope: CoroutineScope) {
         }
     }
 
+    // ---------- Poddavsnitt ----------
+
+    /** Laddar ner ett poddavsnitt. Avsnittets uppgifter sparas i nedladdningen. */
+    fun downloadEpisode(e: se.jpfm.podcast.Episode) {
+        val request = DownloadRequest.Builder(e.id, android.net.Uri.parse(e.audioUrl))
+            .setCustomCacheKey(se.jpfm.playback.ExtItems.cacheKey(e))
+            .setData(Util.getUtf8Bytes(e.toJson().toString()))
+            .build()
+        DownloadService.sendAddDownload(app, JpfmDownloadService::class.java, request, false)
+        e.image?.let { img -> scope.launch(Dispatchers.IO) { runCatching { ArtworkProvider.remoteUri(img) } } }
+    }
+
+    fun removeEpisode(id: String) {
+        DownloadService.sendRemoveDownload(app, JpfmDownloadService::class.java, id, false)
+    }
+
+    /** Nedladdade poddavsnitt, nyast först. */
+    fun downloadedEpisodes(): List<se.jpfm.podcast.Episode> {
+        val out = mutableListOf<se.jpfm.podcast.Episode>()
+        runCatching {
+            manager.downloadIndex.getDownloads(Download.STATE_COMPLETED).use { c ->
+                while (c.moveToNext()) {
+                    val d = c.download
+                    if (!d.request.id.startsWith("ep:")) continue
+                    se.jpfm.podcast.Episode.fromJson(runCatching { JSONObject(Util.fromUtf8Bytes(d.request.data)) }.getOrNull())?.let { out += it }
+                }
+            }
+        }
+        return out.sortedByDescending { it.publishedAt }
+    }
+
     /** Försöker igen med låtar som misslyckades. */
     fun retryFailed() {
         val failed = _states.value.filterValues { it == Download.STATE_FAILED }.keys

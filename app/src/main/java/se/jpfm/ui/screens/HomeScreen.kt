@@ -48,6 +48,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import se.jpfm.playback.QueueBuilder
 import se.jpfm.plex.Album
 import se.jpfm.plex.Artist
 import se.jpfm.plex.Hub
@@ -231,8 +232,14 @@ private fun RadioRow(vm: AppViewModel, hubs: List<Hub>) {
         .take(8)
     val tracks = items.filterIsInstance<Track>().distinctBy { it.ratingKey }.take(4)
 
-    SectionHeader("Radio")
+    val g = LocalGraph.current
+    val favorites by g.radio.favorites.collectAsState()
+    SectionHeader("Radio", action = "Alla kanaler") { vm.nav.select(Tab.RADIO) }
     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Dina radiokanaler först.
+        itemsIndexed(favorites, key = { _, s -> "fav:${s.id}" }) { i, s ->
+            RadioCard(s.name, "LIVE", s.logo, i + 3, onClick = { vm.playStation(favorites, i, QueueBuilder.LIST_FAVORITES, "Dina kanaler") })
+        }
         item(key = "library") {
             RadioCard("Hela biblioteket", "BLANDAD RADIO", null, 0, onClick = { vm.shuffleLibrary() }, icon = Icons.Rounded.Shuffle)
         }

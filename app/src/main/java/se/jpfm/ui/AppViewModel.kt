@@ -67,7 +67,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val q = build()
-                if (q.tracks.isEmpty()) toast("Inget att spela") else player.play(q)
+                if (q.isEmpty) toast("Inget att spela") else player.play(q)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 toast("$errorText: ${e.message ?: "okänt fel"}")
@@ -93,6 +93,43 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun playTracks(tracks: List<Track>, index: Int, title: String, shuffle: Boolean = false) =
         launchQueue { graph.queues.tracks(tracks, index, title, shuffle) }
+
+    // ---------- Radio och poddar ----------
+
+    /** Spelar en kanal; ⏭ byter till nästa kanal i samma lista. */
+    fun playStation(list: List<se.jpfm.radio.RadioStation>, index: Int, listId: String?, title: String) =
+        launchQueue("Kunde inte starta kanalen") { graph.queues.live(list, index, listId, title) }
+
+    fun playEpisode(e: se.jpfm.podcast.Episode) = launchQueue("Kunde inte spela avsnittet") { graph.queues.episode(e) }
+
+    fun toggleFavorite(s: se.jpfm.radio.RadioStation) {
+        val was = graph.radio.isFavorite(s.id)
+        graph.radio.toggleFavorite(s)
+        toast(if (was) "${s.name} borttagen från dina kanaler" else "${s.name} tillagd i dina kanaler")
+    }
+
+    fun toggleSubscription(p: se.jpfm.podcast.Podcast) {
+        val was = graph.podcasts.isSubscribed(p.id)
+        graph.podcasts.toggleSubscription(p)
+        toast(if (was) "Du följer inte ${p.title} längre" else "Du följer ${p.title}")
+    }
+
+    fun downloadEpisode(e: se.jpfm.podcast.Episode) {
+        graph.downloads.downloadEpisode(e)
+        toast("Laddar ner avsnittet")
+    }
+
+    /** Lägg till en podd med RSS-adress. */
+    fun addFeed(url: String) {
+        viewModelScope.launch {
+            runCatching { graph.podcasts.fromFeed(url) }
+                .onSuccess {
+                    graph.podcasts.toggleSubscription(it)
+                    toast("Du följer ${it.title}")
+                }
+                .onFailure { toast("Hittade ingen podd på adressen") }
+        }
+    }
 
     /** Spelar en blandad lista som hämtas först (t.ex. en genre). */
     fun playLoaded(title: String, load: suspend () -> List<Track>) =

@@ -15,6 +15,8 @@ sealed interface Screen {
     data object Search : Screen
     data object Downloads : Screen
     data object Settings : Screen
+    data object Radio : Screen
+    data class PodcastPage(val podcast: se.jpfm.podcast.Podcast) : Screen
     data class Artist(val key: String, val title: String) : Screen
     data class Album(val key: String, val title: String) : Screen
     data class Playlist(val key: String, val title: String) : Screen
@@ -26,6 +28,7 @@ sealed interface Screen {
 enum class Tab(val root: Screen, val label: String) {
     HOME(Screen.Home, "Hem"),
     LIBRARY(Screen.Library, "Bibliotek"),
+    RADIO(Screen.Radio, "Radio"),
     SEARCH(Screen.Search, "Sök"),
     DOWNLOADS(Screen.Downloads, "Nedladdat"),
 }

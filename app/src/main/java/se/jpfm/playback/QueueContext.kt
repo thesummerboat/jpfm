@@ -15,7 +15,7 @@ data class QueueContext(
     /** Spelkön på servern för Plex radio och mixar. */
     val playQueueId: Long? = null,
 ) {
-    enum class Kind { ALBUM, PLAYLIST, ARTIST, STATION, SONIC_RADIO, SHUFFLE_LIBRARY, TRACKS, DOWNLOADS }
+    enum class Kind { ALBUM, PLAYLIST, ARTIST, STATION, SONIC_RADIO, SHUFFLE_LIBRARY, TRACKS, DOWNLOADS, LIVE, PODCAST }
 
     /** Fylls på av sig själv när den börjar ta slut. */
     val endless: Boolean get() = kind == Kind.STATION || kind == Kind.SONIC_RADIO || kind == Kind.SHUFFLE_LIBRARY

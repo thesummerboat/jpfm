@@ -14,6 +14,10 @@ object MediaIds {
     const val PLAYLISTS = "playlists"
     const val ARTISTS = "artists"
     const val DOWNLOADS = "downloads"
+    const val LIBRARY = "library"
+    const val RADIO = "radio"
+    const val PODCASTS = "podcasts"
+    const val NEW_EPISODES = "podnew"
     const val SHUFFLE_ALL = "play:shuffle"
 
     fun artist(key: String) = "artist:$key"
@@ -35,7 +39,7 @@ object MediaIds {
     data class Id(val type: String, val value: String, val context: String? = null)
 
     fun parse(id: String): Id {
-        if (id == ROOT || id == HOME || id == PLAYLISTS || id == ARTISTS || id == DOWNLOADS) return Id(id, "")
+        if (id in setOf(ROOT, HOME, PLAYLISTS, ARTISTS, DOWNLOADS, LIBRARY, RADIO, PODCASTS, NEW_EPISODES)) return Id(id, "")
         if (id == SHUFFLE_ALL) return Id("shuffle", "")
         if (id.startsWith("play:")) {
             val rest = id.removePrefix("play:")

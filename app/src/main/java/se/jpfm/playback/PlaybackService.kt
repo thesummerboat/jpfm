@@ -73,6 +73,9 @@ class PlaybackService : MediaLibraryService() {
     private var lastErrorId: String? = null
     private var errorCount = 0
 
+    /** Det som spelades senast (för att spara poddposition vid byte). */
+    private var lastItem: MediaItem? = null
+
     /** Låten som rapporterades till Plex senast och hur långt den kom. */
     private var reported: Track? = null
     private var reportedPosition = 0L
@@ -141,6 +144,8 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        saveEpisodeProgress()
+        graph.podcasts.save()
         saveQueue()
         report("stopped", appScope = true)
         session?.release()
@@ -155,6 +160,15 @@ class PlaybackService : MediaLibraryService() {
 
     private fun context(): QueueContext? = QueueContext.fromBundle(player.playlistMetadata.extras)
 
+    /** Den sparade kön som spelbara objekt (låtar får rätt kvalitet för nätet just nu). */
+    private fun itemsOf(saved: SavedQueue): List<MediaItem> = saved.entries.map { e ->
+        when (e) {
+            is SavedEntry.Song -> graph.queues.mediaItem(e.track)
+            is SavedEntry.Live -> ExtItems.live(e.station)
+            is SavedEntry.Pod -> ExtItems.episode(e.episode)
+        }
+    }
+
     private fun queueTracks(): List<Track> =
         (0 until player.mediaItemCount).mapNotNull { TrackItems.track(player.getMediaItemAt(it)) }
 
@@ -163,8 +177,7 @@ class PlaybackService : MediaLibraryService() {
         scope.launch {
             val saved = withContext(Dispatchers.IO) { graph.queueStore.load() } ?: return@launch
             if (player.mediaItemCount > 0) return@launch
-            val q = BuiltQueue(saved.tracks, saved.index, saved.context ?: QueueContext(QueueContext.Kind.TRACKS, ""), saved.shuffle)
-            player.setMediaItems(graph.queues.mediaItems(q), saved.index, saved.positionMs)
+            player.setMediaItems(itemsOf(saved), saved.index, saved.positionMs)
             saved.context?.let { player.playlistMetadata = QueueBuilder.contextMetadata(it) }
             player.shuffleModeEnabled = saved.shuffle
             player.repeatMode = saved.repeatMode
@@ -185,7 +198,7 @@ class PlaybackService : MediaLibraryService() {
     private fun saveQueue() {
         if (!::player.isInitialized || player.mediaItemCount == 0) return
         val saved = SavedQueue(
-            tracks = queueTracks(),
+            entries = (0 until player.mediaItemCount).mapNotNull { SavedEntry.of(player.getMediaItemAt(it)) },
             index = player.currentMediaItemIndex,
             positionMs = player.currentPosition,
             context = context(),
@@ -279,7 +292,10 @@ class PlaybackService : MediaLibraryService() {
                 delay(2_000)
                 reportedPosition = player.currentPosition
                 n++
-                if (n % 5 == 0 && player.isPlaying) report("playing")
+                if (n % 5 == 0 && player.isPlaying) {
+                    report("playing")
+                    saveEpisodeProgress()
+                }
                 if (n % 8 == 0) saveQueue()
             }
         }
@@ -299,8 +315,52 @@ class PlaybackService : MediaLibraryService() {
     )
 
     private fun refreshButtons() {
-        val loved = TrackItems.track(player.currentMediaItem)?.isLoved == true
-        session?.setCustomLayout(buttons(loved))
+        val t = TrackItems.track(player.currentMediaItem)
+        // Gilla och låtradio gäller bara låtar från Plex.
+        session?.setCustomLayout(if (t == null) emptyList() else buttons(t.isLoved))
+    }
+
+    // ---------- Radio: vad spelas just nu ----------
+
+    private var nowJob: Job? = null
+
+    /** Byter titel/artist på kanalen som spelas, utan att stoppa ljudet. */
+    private fun updateLive(title: String?, artist: String?) {
+        val item = player.currentMediaItem ?: return
+        val station = ExtItems.station(item) ?: return
+        val md = ExtItems.liveMetadata(station, title, artist)
+        if (md.title == item.mediaMetadata.title && md.artist == item.mediaMetadata.artist) return
+        player.replaceMediaItem(player.currentMediaItemIndex, item.buildUpon().setMediaMetadata(md).build())
+    }
+
+    /** Sveriges Radio skickar inte låttitlar i strömmen: fråga deras API en gång i halvminuten. */
+    private fun watchSr() {
+        nowJob?.cancel()
+        val station = ExtItems.station(player.currentMediaItem) ?: return
+        val channel = station.srChannelId ?: return
+        nowJob = scope.launch {
+            while (isActive) {
+                val now = graph.radio.srNow(channel)
+                if (now != null && ExtItems.station(player.currentMediaItem)?.id == station.id) {
+                    if (now.title != null) updateLive(now.title, now.artist ?: now.program) else updateLive(now.program, null)
+                }
+                delay(30_000)
+            }
+        }
+    }
+
+    // ---------- Poddar: kom ihåg var du var ----------
+
+    private fun saveEpisodeProgress(item: MediaItem? = player.currentMediaItem, position: Long = player.currentPosition) {
+        val e = ExtItems.episode(item) ?: return
+        val duration = player.duration.takeIf { it > 0 && item == player.currentMediaItem } ?: e.durationMs
+        graph.podcasts.saveProgress(e, position.coerceAtLeast(0), duration)
+    }
+
+    /** Poddar spelas i vald hastighet, musik och radio alltid i normal. */
+    private fun applySpeed() {
+        val speed = if (ExtItems.isEpisode(player.currentMediaItem)) graph.prefs.podcastSpeed else 1f
+        if (player.playbackParameters.speed != speed) player.setPlaybackSpeed(speed)
     }
 
     private fun toggleLove() {
@@ -486,7 +546,30 @@ class PlaybackService : MediaLibraryService() {
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            // Samma objekt med ny metadata (ny låt i radion, gillad): inget byte.
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED && mediaItem?.mediaId == lastItem?.mediaId) {
+                lastItem = mediaItem
+                refreshButtons()
+                return
+            }
             retryJob?.cancel()
+            // Föregående poddavsnitt: spara var du var (klart om det tog slut av sig själv).
+            lastItem?.let { prev ->
+                val e = ExtItems.episode(prev)
+                if (e != null) {
+                    val auto = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO
+                    val pos = if (auto) maxOf(e.durationMs, reportedPosition) else reportedPosition
+                    graph.podcasts.saveProgress(e, pos, if (auto) pos else e.durationMs)
+                }
+            }
+            lastItem = mediaItem
+            applySpeed()
+            if (ExtItems.isLive(mediaItem)) {
+                watchSr()
+                ExtItems.station(mediaItem)?.let { st -> scope.launch { graph.radio.countClick(st) } }
+            } else {
+                nowJob?.cancel()
+            }
             // Föregående låt: klar eller avbruten.
             reported?.let { prev ->
                 val pos = if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) prev.durationMs else reportedPosition
@@ -502,7 +585,27 @@ class PlaybackService : MediaLibraryService() {
             saveQueueSoon()
         }
 
+        override fun onMetadata(metadata: androidx.media3.common.Metadata) {
+            // Låttitel i radioströmmen (ICY): "Artist - Låt".
+            if (!ExtItems.isLive(player.currentMediaItem)) return
+            for (i in 0 until metadata.length()) {
+                val entry = metadata.get(i)
+                if (entry is androidx.media3.extractor.metadata.icy.IcyInfo) {
+                    val (artist, title) = se.jpfm.radio.RadioParse.splitStreamTitle(entry.title)
+                    if (title != null) updateLive(title, artist)
+                }
+            }
+        }
+
+        override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
+            // Du ändrade hastigheten på en podd: kom ihåg den.
+            if (ExtItems.isEpisode(player.currentMediaItem)) graph.prefs.podcastSpeed = playbackParameters.speed
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (!isPlaying) saveEpisodeProgress()
+            if (isPlaying && ExtItems.isLive(player.currentMediaItem) && nowJob?.isActive != true) watchSr()
+            if (!isPlaying) nowJob?.cancel()
             if (isPlaying) {
                 if (reported == null) reported = TrackItems.track(player.currentMediaItem)
                 report("playing")
@@ -686,20 +789,23 @@ class PlaybackService : MediaLibraryService() {
                 first.mediaId.isNotEmpty() -> runCatching { graph.queues.fromMediaId(first.mediaId) }.getOrNull()
                 else -> null
             }
-            if (built == null || built.tracks.isEmpty()) {
+            if (built == null || built.isEmpty) {
                 // "Spela musik" utan mer: fortsätt där du var, annars blanda.
                 val saved = withContext(Dispatchers.IO) { graph.queueStore.load() }
                 if (saved != null) {
-                    val q = BuiltQueue(saved.tracks, saved.index, saved.context ?: QueueContext(QueueContext.Kind.TRACKS, ""), saved.shuffle)
                     saved.context?.let { player.playlistMetadata = QueueBuilder.contextMetadata(it) }
-                    return@future MediaSession.MediaItemsWithStartPosition(graph.queues.mediaItems(q), saved.index, saved.positionMs)
+                    return@future MediaSession.MediaItemsWithStartPosition(itemsOf(saved), saved.index, saved.positionMs)
                 }
                 throw IllegalStateException("Hittade inget att spela")
             }
             player.playlistMetadata = QueueBuilder.contextMetadata(built.context)
             player.shuffleModeEnabled = false
             pendingShuffle = built.shuffle
-            MediaSession.MediaItemsWithStartPosition(graph.queues.mediaItems(built), built.startIndex, C.TIME_UNSET)
+            MediaSession.MediaItemsWithStartPosition(
+                graph.queues.mediaItems(built),
+                built.startIndex,
+                built.startPositionMs.takeIf { it > 0 } ?: C.TIME_UNSET,
+            )
         }
 
         override fun onPlaybackResumption(
@@ -708,11 +814,10 @@ class PlaybackService : MediaLibraryService() {
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = scope.future {
             val saved = withContext(Dispatchers.IO) { graph.queueStore.load() }
                 ?: throw IllegalStateException("Ingen sparad kö")
-            val q = BuiltQueue(saved.tracks, saved.index, saved.context ?: QueueContext(QueueContext.Kind.TRACKS, ""), saved.shuffle)
             saved.context?.let { player.playlistMetadata = QueueBuilder.contextMetadata(it) }
             player.shuffleModeEnabled = false
             pendingShuffle = saved.shuffle
-            MediaSession.MediaItemsWithStartPosition(graph.queues.mediaItems(q), saved.index, saved.positionMs)
+            MediaSession.MediaItemsWithStartPosition(itemsOf(saved), saved.index, saved.positionMs)
         }
     }
 

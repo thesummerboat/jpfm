@@ -51,9 +51,12 @@ import kotlin.math.abs
 /** Liten spelare ovanför menyn. Tryck för att öppna, svep åt sidan för nästa/föregående. */
 @Composable
 fun MiniPlayer(p: PlayerConnection, onOpen: () -> Unit, modifier: Modifier = Modifier) {
-    val track = p.current ?: return
+    if (!p.hasMedia) return
+    val thumb = p.nowThumb
+    val title = p.nowTitle ?: p.current?.title ?: ""
+    val subtitle = (if (p.isLive) "LIVE · " else "") + (p.nowSubtitle ?: p.current?.displayArtist ?: "")
     val dynamic = LocalSettings.current.dynamicColors
-    val colors = rememberArtColors(track.thumb, enabled = dynamic)
+    val colors = rememberArtColors(thumb, enabled = dynamic)
     val bg by animateColorAsState(colors.base.over(Jp.SurfaceHigh, 0.75f), tween(600), label = "miniBg")
     val offset = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
@@ -67,7 +70,7 @@ fun MiniPlayer(p: PlayerConnection, onOpen: () -> Unit, modifier: Modifier = Mod
             .clip(RoundedCornerShape(12.dp))
             .background(bg)
             .clickable(onClick = onOpen)
-            .pointerInput(track.ratingKey) {
+            .pointerInput(p.currentIndex) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
                         val v = offset.value
@@ -97,11 +100,11 @@ fun MiniPlayer(p: PlayerConnection, onOpen: () -> Unit, modifier: Modifier = Mod
                 .padding(start = 8.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Artwork(track.thumb, Modifier.size(46.dp), size = 144, shape = RoundedCornerShape(7.dp))
+            Artwork(thumb, Modifier.size(46.dp), size = 144, shape = RoundedCornerShape(7.dp))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(track.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(track.displayArtist, style = MaterialTheme.typography.bodySmall, color = Jp.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Jp.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                 if (p.isBuffering) {
@@ -114,8 +117,8 @@ fun MiniPlayer(p: PlayerConnection, onOpen: () -> Unit, modifier: Modifier = Mod
             }
             IconButton(onClick = { p.next() }) { Icon(Icons.Rounded.SkipNext, "Nästa", modifier = Modifier.size(28.dp)) }
         }
-        // Hur långt låten kommit.
-        val fraction = if (p.duration > 0) (p.position.toFloat() / p.duration).coerceIn(0f, 1f) else 0f
+        // Hur långt låten kommit (radio sänder live och har inget slut).
+        val fraction = if (p.isLive) 1f else if (p.duration > 0) (p.position.toFloat() / p.duration).coerceIn(0f, 1f) else 0f
         Box(
             Modifier
                 .align(Alignment.BottomStart)

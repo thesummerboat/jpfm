@@ -86,6 +86,9 @@ class AppGraph(val app: JpfmApp) {
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     }
 
+    val radio = se.jpfm.radio.RadioRepository(http, app.filesDir)
+    val podcasts = se.jpfm.podcast.PodcastRepository(http, app.filesDir)
+
     val queueStore = QueueStore(app.filesDir)
     val queues = QueueBuilder(this)
     val updater = Updater(app, http)

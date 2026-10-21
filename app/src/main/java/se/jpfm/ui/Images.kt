@@ -56,6 +56,8 @@ fun artModel(context: Context, g: AppGraph, server: PlexServer?, thumb: String, 
     val key = "$thumb@$size"
     val offline = ArtworkProvider.offlineFile(g.app, thumb)
     val data: Any = when {
+        // Radiologotyper och poddomslag: direkt från webben.
+        thumb.startsWith("http") -> thumb
         offline.exists() -> offline
         server != null -> g.client.imageUrl(server, thumb, size)
         // Utan server: en adress som inte går att nå, men cachen hittar bilden på nyckeln.

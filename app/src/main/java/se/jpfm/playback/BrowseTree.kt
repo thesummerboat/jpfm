@@ -47,11 +47,25 @@ class BrowseTree(private val g: AppGraph) {
         return when (id.type) {
             MediaIds.ROOT -> listOf(
                 folder(MediaIds.HOME, "Hem", icon(R.drawable.ic_auto_home), MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, STYLE_LIST),
+                folder(MediaIds.LIBRARY, "Bibliotek", icon(R.drawable.ic_auto_album), MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, STYLE_LIST),
+                folder(MediaIds.RADIO, "Radio", icon(R.drawable.ic_auto_radio), MediaMetadata.MEDIA_TYPE_FOLDER_RADIO_STATIONS, STYLE_GRID),
+                folder(MediaIds.PODCASTS, "Poddar", icon(R.drawable.ic_auto_playlist), MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS, STYLE_GRID),
+            )
+            MediaIds.HOME -> home() + if (online() && g.downloads.collections.value.isNotEmpty()) {
+                listOf(folder(MediaIds.DOWNLOADS, "Nedladdat", icon(R.drawable.ic_auto_downloads), MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, STYLE_GRID, group = "Offline"))
+            } else {
+                emptyList()
+            }
+            MediaIds.LIBRARY -> listOf(
                 folder(MediaIds.PLAYLISTS, "Spellistor", icon(R.drawable.ic_auto_playlist), MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS, STYLE_LIST),
                 folder(MediaIds.ARTISTS, "Artister", icon(R.drawable.ic_auto_artist), MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS, STYLE_LIST),
                 folder(MediaIds.DOWNLOADS, "Nedladdat", icon(R.drawable.ic_auto_downloads), MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, STYLE_GRID),
             )
-            MediaIds.HOME -> home()
+            MediaIds.RADIO -> radio()
+            "radiolist" -> stations(id.value)
+            MediaIds.PODCASTS -> podcasts()
+            MediaIds.NEW_EPISODES -> runCatching { g.podcasts.latest() }.getOrDefault(emptyList()).take(40).map { episodeItem(it) }
+            "pod" -> podcastEpisodes(id.value)
             "hub" -> hubs.getOrNull(id.value.toIntOrNull() ?: -1)?.items.orEmpty().mapNotNull { item(it, "Hem") }
             MediaIds.PLAYLISTS -> if (online()) g.library.playlists().map { playlistFolder(it) } else offlineOf("playlist:")
             MediaIds.ARTISTS -> artists()
@@ -138,6 +152,71 @@ class BrowseTree(private val g: AppGraph) {
         val c = g.downloads.collection(collectionId) ?: return emptyList()
         return g.downloads.tracksOf(c).filter { g.downloads.isDownloaded(it.ratingKey) }
             .map { trackItem(it, "offline:" + java.net.URLEncoder.encode(collectionId, "UTF-8")) }
+    }
+
+    // ---------- Radio och poddar ----------
+
+    private suspend fun radio(): List<MediaItem> {
+        val fav = g.radio.favorites.value.map { stationItem(it, QueueBuilder.LIST_FAVORITES, "Dina kanaler") }
+        return fav + listOf(
+            folder("radiolist:${QueueBuilder.LIST_SR}", "Sveriges Radio", icon(R.drawable.ic_auto_radio), MediaMetadata.MEDIA_TYPE_FOLDER_RADIO_STATIONS, STYLE_GRID, group = "Fler kanaler"),
+            folder("radiolist:${QueueBuilder.LIST_SWEDEN}", "Populärt i Sverige", icon(R.drawable.ic_auto_radio), MediaMetadata.MEDIA_TYPE_FOLDER_RADIO_STATIONS, STYLE_GRID, group = "Fler kanaler"),
+        )
+    }
+
+    private suspend fun stations(listId: String): List<MediaItem> {
+        val list = when (listId) {
+            QueueBuilder.LIST_SR -> g.radio.srChannels()
+            QueueBuilder.LIST_SWEDEN -> g.radio.popularInSweden()
+            else -> g.radio.favorites.value
+        }
+        return list.map { stationItem(it, listId, it.group) }
+    }
+
+    private fun stationItem(s: se.jpfm.radio.RadioStation, listId: String, group: String?): MediaItem {
+        val base = ExtItems.live(s, listId)
+        val extras = Bundle(base.mediaMetadata.extras ?: Bundle())
+        group?.let { extras.putString(GROUP_TITLE, it) }
+        return MediaItem.Builder()
+            .setMediaId(base.mediaId)
+            .setMediaMetadata(base.mediaMetadata.buildUpon().setExtras(extras).build())
+            .build()
+    }
+
+    private fun podcasts(): List<MediaItem> {
+        val subs = g.podcasts.subscriptions.value
+        val out = mutableListOf<MediaItem>()
+        if (subs.isNotEmpty()) {
+            out += folder(MediaIds.NEW_EPISODES, "Nya avsnitt", icon(R.drawable.ic_auto_recent), MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS, STYLE_LIST)
+        }
+        subs.forEach { p ->
+            out += folder("pod:${p.id}", p.title, p.image?.let { ArtworkProvider.remoteUri(it) }, MediaMetadata.MEDIA_TYPE_PODCAST, STYLE_LIST, subtitle = p.author, group = "Dina poddar")
+        }
+        return out
+    }
+
+    private suspend fun podcastEpisodes(podcastId: String): List<MediaItem> {
+        val p = g.podcasts.podcast(podcastId) ?: return emptyList()
+        val eps = runCatching { g.podcasts.feed(p) }.getOrDefault(g.podcasts.cachedEpisodes(podcastId))
+        return eps.take(60).map { episodeItem(it) }
+    }
+
+    private fun episodeItem(e: se.jpfm.podcast.Episode): MediaItem {
+        val base = ExtItems.episode(e)
+        val extras = Bundle(base.mediaMetadata.extras ?: Bundle())
+        val prog = g.podcasts.progressOf(e.id)
+        // Bilen visar hur långt du lyssnat (0 = inte påbörjat, 1 = delvis, 2 = klart).
+        extras.putInt(PLAYBACK_STATUS, when {
+            prog == null -> 0
+            prog.played -> 2
+            else -> 1
+        })
+        if (prog != null && !prog.played) extras.putDouble(COMPLETION, prog.fraction.toDouble())
+        if (g.downloads.isDownloaded(e.id)) extras.putLong(DOWNLOAD_STATUS, STATUS_DOWNLOADED)
+        return MediaItem.Builder()
+            .setMediaId(base.mediaId)
+            .setMediaMetadata(base.mediaMetadata.buildUpon().setExtras(extras).build())
+            .build()
     }
 
     // ---------- Sök ----------
@@ -268,5 +347,7 @@ class BrowseTree(private val g: AppGraph) {
         const val STATUS_DOWNLOADED = 2L
         const val STYLE_LIST = 1
         const val STYLE_GRID = 2
+        const val PLAYBACK_STATUS = "android.media.extra.PLAYBACK_STATUS"
+        const val COMPLETION = "androidx.media.MediaItem.Extras.COMPLETION_PERCENTAGE"
     }
 }

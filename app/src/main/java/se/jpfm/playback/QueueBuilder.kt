@@ -9,6 +9,8 @@ import se.jpfm.plex.Artist
 import se.jpfm.plex.Playlist
 import se.jpfm.plex.Station
 import se.jpfm.plex.Track
+import se.jpfm.podcast.Episode
+import se.jpfm.radio.RadioStation
 import java.io.IOException
 
 /** En färdig kö att lämna till spelaren. */
@@ -17,7 +19,13 @@ data class BuiltQueue(
     val startIndex: Int,
     val context: QueueContext,
     val shuffle: Boolean = false,
-)
+    /** Radiokanaler och poddavsnitt (i stället för låtar från Plex). */
+    val media: List<MediaItem>? = null,
+    /** Var första objektet ska börja (poddavsnitt fortsätter där du slutade). */
+    val startPositionMs: Long = 0L,
+) {
+    val isEmpty: Boolean get() = (media?.size ?: tracks.size) == 0
+}
 
 /**
  * Bygger köer: album, spellistor, artister, radio, blandat och sökningar ("Spela Kent").
@@ -30,6 +38,7 @@ class QueueBuilder(private val g: AppGraph) {
     private suspend fun online(): Boolean = g.session.awaitSettled()
 
     fun mediaItems(q: BuiltQueue): List<MediaItem> {
+        q.media?.let { return it }
         val quality = g.currentQuality()
         val ctxId = when (q.context.kind) {
             QueueContext.Kind.ALBUM -> q.context.id?.let { "album:$it" }
@@ -116,6 +125,63 @@ class QueueBuilder(private val g: AppGraph) {
     fun tracks(list: List<Track>, start: Int, title: String, shuffle: Boolean = false): BuiltQueue =
         BuiltQueue(list, if (shuffle) list.indices.random() else start.coerceIn(0, (list.size - 1).coerceAtLeast(0)), QueueContext(QueueContext.Kind.TRACKS, title), shuffle)
 
+    // ---------- Radio och poddar ----------
+
+    /** Radiokanaler: ⏭ byter till nästa kanal i listan. */
+    fun live(list: List<RadioStation>, start: Int, listId: String?, title: String = "Radio"): BuiltQueue =
+        BuiltQueue(
+            tracks = emptyList(),
+            startIndex = start.coerceIn(0, (list.size - 1).coerceAtLeast(0)),
+            context = QueueContext(QueueContext.Kind.LIVE, title, listId),
+            media = list.map { ExtItems.live(it, listId) },
+        )
+
+    /** Ett poddavsnitt, som fortsätter där du slutade. */
+    fun episode(e: Episode): BuiltQueue = BuiltQueue(
+        tracks = emptyList(),
+        startIndex = 0,
+        context = QueueContext(QueueContext.Kind.PODCAST, e.podcastTitle, e.podcastId),
+        media = listOf(ExtItems.episode(e)),
+        startPositionMs = g.podcasts.startPosition(e),
+    )
+
+    private suspend fun stationList(listId: String): List<RadioStation> = when (listId) {
+        LIST_FAVORITES -> g.radio.favorites.value
+        LIST_SR -> g.radio.srChannels()
+        LIST_SWEDEN -> g.radio.popularInSweden()
+        else -> emptyList()
+    }
+
+    private suspend fun liveFromId(value: String): BuiltQueue? {
+        val stationId = value.substringBefore('@')
+        val listId = value.substringAfter('@', "").ifEmpty { null }
+        val list = listId?.let { stationList(it) }.orEmpty()
+        val index = list.indexOfFirst { it.id == stationId }
+        if (index >= 0) return live(list, index, listId, title(listId))
+        val s = g.radio.station(stationId) ?: (g.radio.srChannels() + g.radio.popularInSweden()).firstOrNull { it.id == stationId } ?: return null
+        return live(listOf(s), 0, null)
+    }
+
+    private fun title(listId: String?) = when (listId) {
+        LIST_FAVORITES -> "Dina kanaler"
+        LIST_SR -> "Sveriges Radio"
+        LIST_SWEDEN -> "Populärt i Sverige"
+        else -> "Radio"
+    }
+
+    /** "Spela P3" / "Spela Rix FM": bara exakta kanalnamn, så att musiksökningar inte kapas. */
+    private suspend fun stationByName(query: String): BuiltQueue? {
+        fun norm(s: String) = s.lowercase().replace(Regex("[^a-zåäö0-9]"), "")
+        val q = norm(query.removePrefix("radio ").removeSuffix(" radio"))
+        if (q.isEmpty()) return null
+        for (listId in listOf(LIST_FAVORITES, LIST_SR, LIST_SWEDEN)) {
+            val list = runCatching { stationList(listId) }.getOrDefault(emptyList())
+            val i = list.indexOfFirst { norm(it.name) == q || norm(it.name) == norm("sveriges radio $query") }
+            if (i >= 0) return live(list, i, listId, title(listId))
+        }
+        return null
+    }
+
     // ---------- Från ett id (Android Auto) ----------
 
     suspend fun fromMediaId(id: String): BuiltQueue? {
@@ -138,6 +204,8 @@ class QueueBuilder(private val g: AppGraph) {
             "play-radio" -> library.artistPage(p.value).artist.let { artistRadio(it.ratingKey, it.title) }
             "play-offline" -> offline(p.value, null, true)
             "station" -> station(Station(p.value, "Radio", null, p.value))
+            "live" -> liveFromId(p.value)
+            "ep" -> g.podcasts.episode("ep:${p.value}")?.let { episode(it) }
             "shuffle" -> shuffleLibrary()
             else -> null
         }
@@ -167,6 +235,11 @@ class QueueBuilder(private val g: AppGraph) {
     suspend fun fromSearch(query: String, extras: Bundle?): BuiltQueue? {
         val q = query.trim()
         if (q.isEmpty()) return null
+        stationByName(q)?.let { return it }
+        g.podcasts.subscriptions.value.firstOrNull { it.title.equals(q, ignoreCase = true) }?.let { pod ->
+            val latest = runCatching { g.podcasts.feed(pod) }.getOrDefault(emptyList()).firstOrNull()
+            if (latest != null) return episode(latest)
+        }
         val focus = extras?.getString(EXTRA_FOCUS)
         val artistHint = extras?.getString(EXTRA_ARTIST)
         val albumHint = extras?.getString(EXTRA_ALBUM)
@@ -239,6 +312,9 @@ class QueueBuilder(private val g: AppGraph) {
 
     companion object {
         const val ALL_OFFLINE = "all"
+        const val LIST_FAVORITES = "fav"
+        const val LIST_SR = "sr"
+        const val LIST_SWEDEN = "se"
         private const val EXTRA_FOCUS = "android.intent.extra.focus"
         private const val EXTRA_ARTIST = "android.intent.extra.artist"
         private const val EXTRA_ALBUM = "android.intent.extra.album"

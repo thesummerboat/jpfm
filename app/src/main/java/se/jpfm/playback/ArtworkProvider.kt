@@ -23,6 +23,11 @@ class ArtworkProvider : ContentProvider() {
     override fun getType(uri: Uri): String = "image/jpeg"
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
+        uri.getQueryParameter("r")?.let { key ->
+            val ctx = context ?: throw FileNotFoundException("Ingen context")
+            val f = ensureRemote(ctx.applicationContext as JpfmApp, key) ?: throw FileNotFoundException("Bilden går inte att hämta")
+            return ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
+        }
         val path = uri.getQueryParameter("p")?.takeIf { ALLOWED.matches(it) } ?: throw FileNotFoundException(uri.toString())
         val size = uri.getQueryParameter("s")?.toIntOrNull()?.coerceIn(64, 1200) ?: DEFAULT_SIZE
         val ctx = context ?: throw FileNotFoundException("Ingen context")
@@ -42,6 +47,33 @@ class ArtworkProvider : ContentProvider() {
         /** Bara omslag från musikbiblioteket – inte vilka adresser som helst på servern. */
         private val ALLOWED = Regex("""^/(library/metadata|library/collections|playlists)/\d+/(thumb|art|composite)(/\d+)?$""")
         const val DEFAULT_SIZE = 600
+
+        /** Bilder från andra än Plex (radiologotyper, poddomslag) som appen själv valt ut. */
+        private val remote = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+        fun remoteUri(url: String): Uri {
+            val key = hash(url)
+            remote[key] = url
+            return Uri.Builder().scheme("content").authority(AUTHORITY).appendPath("ext").appendQueryParameter("r", key).build()
+        }
+
+        private fun ensureRemote(app: JpfmApp, key: String): File? {
+            val f = File(File(app.cacheDir, "art").apply { mkdirs() }, "r_$key.img")
+            if (f.exists() && f.length() > 0) return f
+            val url = remote[key] ?: return null
+            return try {
+                app.graph.http.newCall(Request.Builder().url(url).header("User-Agent", "JPFM/1.0").build()).execute().use { resp ->
+                    val body = resp.body
+                    if (!resp.isSuccessful || body == null || body.contentLength() > 8_000_000) return null
+                    val tmp = File(f.parentFile, f.name + ".tmp")
+                    body.byteStream().use { input -> tmp.outputStream().use { input.copyTo(it) } }
+                    if (!tmp.renameTo(f)) return null
+                    f
+                }
+            } catch (e: Exception) {
+                null
+            }
+        }
 
         fun uri(thumb: String, size: Int = DEFAULT_SIZE): Uri = Uri.Builder()
             .scheme("content").authority(AUTHORITY).appendPath("art")

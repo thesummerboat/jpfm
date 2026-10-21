@@ -125,6 +125,11 @@ fun NowPlaying(vm: AppViewModel, onClose: () -> Unit) {
     val settings = LocalSettings.current
     BackHandler(onBack = onClose)
     if (track == null) {
+        // Radio och poddar har en egen spelarvy.
+        if (p.nowStation != null || p.nowEpisode != null) {
+            ExtNowPlaying(vm, onClose)
+            return
+        }
         LaunchedEffect(Unit) { onClose() }
         return
     }
@@ -356,7 +361,7 @@ private fun PanelToggle(icon: androidx.compose.ui.graphics.vector.ImageVector, l
 
 /** Sovtimer: pausar efter en stund eller när låten är slut. */
 @Composable
-private fun SleepButton(p: se.jpfm.ui.PlayerConnection, accent: Color) {
+internal fun SleepButton(p: se.jpfm.ui.PlayerConnection, accent: Color) {
     var open by remember { mutableStateOf(false) }
     val active = p.sleepEndsAt != null
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }

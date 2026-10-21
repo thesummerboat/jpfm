@@ -42,6 +42,30 @@ object Format {
         else -> "God natt"
     }
 
+    /** Datum för ett poddavsnitt: "Idag", "Igår", "12 okt", "3 jan 2024". */
+    fun date(ms: Long, now: Long = System.currentTimeMillis()): String {
+        if (ms <= 0) return ""
+        val cal = Calendar.getInstance().apply { timeInMillis = ms }
+        val today = Calendar.getInstance().apply { timeInMillis = now }
+        fun dayIndex(c: Calendar) = c.get(Calendar.YEAR) * 400 + c.get(Calendar.DAY_OF_YEAR)
+        val diff = dayIndex(today) - dayIndex(cal)
+        val months = listOf("jan", "feb", "mar", "apr", "maj", "jun", "jul", "aug", "sep", "okt", "nov", "dec")
+        val d = cal.get(Calendar.DAY_OF_MONTH)
+        val m = months[cal.get(Calendar.MONTH)]
+        return when {
+            diff == 0 -> "Idag"
+            diff == 1 -> "Igår"
+            cal.get(Calendar.YEAR) == today.get(Calendar.YEAR) -> "$d $m"
+            else -> "$d $m ${cal.get(Calendar.YEAR)}"
+        }
+    }
+
+    /** Kvar av ett avsnitt: "23 min kvar". */
+    fun remaining(positionMs: Long, durationMs: Long): String {
+        val left = ((durationMs - positionMs) / 60_000).coerceAtLeast(1)
+        return if (left >= 60) "${left / 60} h ${left % 60} min kvar" else "$left min kvar"
+    }
+
     /** "FLAC · 980 kbps" för låtens tekniska info. */
     fun quality(codec: String?, bitrate: Int?): String? {
         val c = codec?.uppercase() ?: return null

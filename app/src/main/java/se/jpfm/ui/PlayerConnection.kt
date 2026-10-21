@@ -22,6 +22,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import se.jpfm.AppGraph
 import se.jpfm.playback.BuiltQueue
+import se.jpfm.playback.ExtItems
+import se.jpfm.podcast.Episode
+import se.jpfm.radio.RadioStation
 import se.jpfm.playback.PlaybackService
 import se.jpfm.playback.QueueBuilder
 import se.jpfm.playback.QueueContext
@@ -68,7 +71,25 @@ class PlayerConnection(private val context: Context, private val g: AppGraph, pr
     var transcoded by mutableStateOf(false)
         private set
 
-    val hasMedia: Boolean get() = current != null
+    /** Radiokanalen som spelas, om det är radio. */
+    var nowStation by mutableStateOf<RadioStation?>(null)
+        private set
+    /** Poddavsnittet som spelas, om det är en podd. */
+    var nowEpisode by mutableStateOf<Episode?>(null)
+        private set
+    /** Titel och undertitel som de visas (för radio: låten som spelas just nu). */
+    var nowTitle by mutableStateOf<String?>(null)
+        private set
+    var nowSubtitle by mutableStateOf<String?>(null)
+        private set
+    var speed by mutableStateOf(1f)
+        private set
+
+    val hasMedia: Boolean get() = current != null || nowStation != null || nowEpisode != null
+    val isLive: Boolean get() = nowStation != null
+
+    /** Bild för det som spelas: omslag från Plex, kanalens logga eller poddens bild. */
+    val nowThumb: String? get() = current?.thumb ?: nowStation?.logo ?: nowEpisode?.image
 
     /** Sovtimer (sköts av spelartjänsten): när musiken pausas, eller null. */
     var sleepEndsAt by mutableStateOf<Long?>(null)
@@ -133,6 +154,7 @@ class PlayerConnection(private val context: Context, private val g: AppGraph, pr
             }
             if (events.contains(Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)) shuffle = player.shuffleModeEnabled
             if (events.contains(Player.EVENT_REPEAT_MODE_CHANGED)) repeatMode = player.repeatMode
+            if (events.contains(Player.EVENT_PLAYBACK_PARAMETERS_CHANGED)) speed = player.playbackParameters.speed
             if (events.contains(Player.EVENT_PLAYLIST_METADATA_CHANGED)) queueContext = QueueContext.fromBundle(player.playlistMetadata.extras)
             if (events.contains(Player.EVENT_POSITION_DISCONTINUITY)) syncPosition(player)
             if (events.contains(Player.EVENT_PLAYER_ERROR)) {
@@ -164,7 +186,13 @@ class PlayerConnection(private val context: Context, private val g: AppGraph, pr
     }
 
     private fun syncCurrent(p: Player) {
-        current = TrackItems.track(p.currentMediaItem)
+        val item = p.currentMediaItem
+        current = TrackItems.track(item)
+        nowStation = ExtItems.station(item)
+        nowEpisode = ExtItems.episode(item)
+        nowTitle = item?.mediaMetadata?.title?.toString()
+        nowSubtitle = item?.mediaMetadata?.artist?.toString()
+        speed = p.playbackParameters.speed
         transcoded = p.currentMediaItem?.let { TrackItems.isTranscoded(it) } == true
         currentIndex = p.currentMediaItemIndex
         duration = p.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: (current?.durationMs ?: 0L)
@@ -209,7 +237,7 @@ class PlayerConnection(private val context: Context, private val g: AppGraph, pr
     // ---------- Styrning ----------
 
     fun play(q: BuiltQueue) {
-        if (q.tracks.isEmpty()) return
+        if (q.isEmpty) return
         val c = controller ?: run {
             pending = q
             connect()
@@ -219,7 +247,7 @@ class PlayerConnection(private val context: Context, private val g: AppGraph, pr
         // Sammanhanget först, så att tjänsten inte fyller på den nya kön som om den vore radio.
         c.shuffleModeEnabled = false
         c.playlistMetadata = QueueBuilder.contextMetadata(q.context)
-        c.setMediaItems(g.queues.mediaItems(q), q.startIndex, 0L)
+        c.setMediaItems(g.queues.mediaItems(q), q.startIndex, q.startPositionMs)
         c.prepare()
         // Blanda efteråt: tjänsten blandar då med vald låt först.
         if (q.shuffle) c.shuffleModeEnabled = true
@@ -244,10 +272,22 @@ class PlayerConnection(private val context: Context, private val g: AppGraph, pr
 
     fun next() = controller?.seekToNext()
 
+    fun seekBack() = controller?.seekBack()
+    fun seekForward() = controller?.seekForward()
+
+    fun setPlaybackSpeed(x: Float) {
+        controller?.setPlaybackSpeed(x)
+    }
+
     /** Tillbaka: börja om låten efter tre sekunder, annars föregående. */
     fun previous() {
         val c = controller ?: return
-        if (c.currentPosition > 3_000 || !c.hasPreviousMediaItem()) c.seekTo(0) else c.seekToPreviousMediaItem()
+        when {
+            // Radio: föregående kanal.
+            isLive -> if (c.hasPreviousMediaItem()) c.seekToPreviousMediaItem()
+            c.currentPosition > 3_000 || !c.hasPreviousMediaItem() -> c.seekTo(0)
+            else -> c.seekToPreviousMediaItem()
+        }
     }
 
     fun seekTo(ms: Long) {

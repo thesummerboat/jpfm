@@ -110,6 +110,7 @@ dependencies {
     implementation("androidx.media3:media3-datasource:$media3")
     implementation("androidx.media3:media3-database:$media3")
     implementation("androidx.media3:media3-common:$media3")
+    implementation("androidx.media3:media3-extractor:$media3")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
@@ -119,4 +120,6 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     // Riktig org.json i testerna (Androids egen är bara en stubbe utanför telefonen).
     testImplementation("org.json:json:20240303")
+    // XmlPullParser för att testa RSS-tolkningen utanför telefonen.
+    testImplementation("net.sf.kxml:kxml2:2.3.0")
 }

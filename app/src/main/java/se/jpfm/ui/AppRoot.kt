@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.DownloadForOffline
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Radio
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -154,6 +155,8 @@ private fun ScreenContent(vm: AppViewModel, screen: Screen) {
         Screen.Search -> SearchScreen(vm)
         Screen.Downloads -> DownloadsScreen(vm)
         Screen.Settings -> SettingsScreen(vm)
+        Screen.Radio -> se.jpfm.ui.screens.RadioScreen(vm)
+        is Screen.PodcastPage -> se.jpfm.ui.screens.PodcastScreen(vm, screen.podcast)
         is Screen.Artist -> ArtistScreen(vm, screen.key, screen.title)
         is Screen.Album -> AlbumScreen(vm, screen.key, screen.title)
         is Screen.Playlist -> PlaylistScreen(vm, screen.key, screen.title)
@@ -166,6 +169,7 @@ private fun ScreenContent(vm: AppViewModel, screen: Screen) {
 private fun tabIcon(t: Tab): ImageVector = when (t) {
     Tab.HOME -> Icons.Rounded.Home
     Tab.LIBRARY -> Icons.Rounded.LibraryMusic
+    Tab.RADIO -> Icons.Rounded.Radio
     Tab.SEARCH -> Icons.Rounded.Search
     Tab.DOWNLOADS -> Icons.Rounded.DownloadForOffline
 }

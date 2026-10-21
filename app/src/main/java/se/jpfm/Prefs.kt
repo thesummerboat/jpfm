@@ -97,6 +97,16 @@ class Prefs(context: Context) {
         get() = sp.getInt("library_tab", 0)
         set(value) { sp.edit().putInt("library_tab", value).apply() }
 
+    /** Uppspelningshastighet för poddar. */
+    var podcastSpeed: Float
+        get() = sp.getFloat("podcast_speed", 1f)
+        set(value) { sp.edit().putFloat("podcast_speed", value).apply() }
+
+    /** Vald del av radiofliken: 0 = kanaler, 1 = poddar. */
+    var radioTab: Int
+        get() = sp.getInt("radio_tab", 0)
+        set(value) { sp.edit().putInt("radio_tab", value).apply() }
+
     var albumSort: String
         get() = sp.getString("album_sort", "title") ?: "title"
         set(value) { sp.edit().putString("album_sort", value).apply() }
