@@ -29,6 +29,8 @@ data class RadioStation(
     val tags: List<String> = emptyList(),
     /** Grupp för Sveriges Radio: "Rikskanal", "Lokal kanal" … */
     val group: String? = null,
+    /** Reservadress om huvudadressen inte fungerar. */
+    val altUrl: String? = null,
 ) {
     val srChannelId: Int? get() = if (id.startsWith("sr:")) id.removePrefix("sr:").toIntOrNull() else null
 
@@ -44,6 +46,7 @@ data class RadioStation(
         bitrate?.let { put("bitrate", it) }
         if (tags.isNotEmpty()) put("tags", JSONArray(tags))
         group?.let { put("group", it) }
+        altUrl?.let { put("alt", it) }
     }
 
     companion object {
@@ -63,6 +66,7 @@ data class RadioStation(
                 bitrate = if (o.has("bitrate")) o.optInt("bitrate") else null,
                 tags = o.optJSONArray("tags")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList(),
                 group = o.optString("group").ifBlank { null },
+                altUrl = o.optString("alt").ifBlank { null },
             )
         }
     }
@@ -87,6 +91,7 @@ object RadioParse {
                 name = name,
                 // AAC i hög kvalitet; servern skickar vidare till närmaste kantserver.
                 streamUrl = srStreamUrl(id, live),
+                altUrl = live,
                 logo = c.optString("image").ifBlank { null } ?: c.optString("imagetemplate").ifBlank { null },
                 tagline = c.optString("tagline").ifBlank { null },
                 color = parseColor(c.optString("color")),
@@ -108,7 +113,8 @@ object RadioParse {
     }
 
     fun srStreamUrl(id: Int, fallback: String?): String =
-        "https://sverigesradio.se/topsy/direkt/srapi/$id-hi-aac-http".takeIf { id > 0 } ?: fallback.orEmpty()
+        // Sveriges Radios dokumenterade adress; skickar vidare till närmaste server (https).
+        "http://sverigesradio.se/topsy/direkt/srapi/$id-hi-aac-http".takeIf { id > 0 } ?: fallback.orEmpty()
 
     fun parseColor(hex: String?): Int? {
         val h = hex?.trim()?.removePrefix("#") ?: return null
@@ -343,8 +349,8 @@ class RadioRepository(private val http: OkHttpClient, dir: File) {
 
         /** Om SR:s API inte svarar: de stora kanalerna. */
         val FALLBACK_SR = listOf(
-            RadioStation("sr:132", "P1", RadioParse.srStreamUrl(132, null), group = "Rikskanal", color = 0xFF31A1BD.toInt()),
-            RadioStation("sr:164", "P3", RadioParse.srStreamUrl(164, null), group = "Rikskanal", color = 0xFF19A972.toInt()),
+            RadioStation("sr:132", "P1", RadioParse.srStreamUrl(132, null), group = "Rikskanal", color = 0xFF31A1BD.toInt(), altUrl = "https://sverigesradio.se/topsy/direkt/srapi/132.mp3"),
+            RadioStation("sr:164", "P3", RadioParse.srStreamUrl(164, null), group = "Rikskanal", color = 0xFF19A972.toInt(), altUrl = "https://sverigesradio.se/topsy/direkt/srapi/164.mp3"),
         )
     }
 }

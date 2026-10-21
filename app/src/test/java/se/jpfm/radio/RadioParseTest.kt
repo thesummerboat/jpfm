@@ -20,7 +20,8 @@ class RadioParseTest {
         assertEquals(listOf("P1", "P3", "P4 Västerbotten", "SR Sápmi"), list.map { it.name })
         assertEquals("sr:164", list[1].id)
         assertEquals(164, list[1].srChannelId)
-        assertEquals("https://sverigesradio.se/topsy/direkt/srapi/164-hi-aac-http", list[1].streamUrl)
+        assertEquals("http://sverigesradio.se/topsy/direkt/srapi/164-hi-aac-http", list[1].streamUrl)
+        assertEquals("https://a/164.mp3", list[1].altUrl)
         assertEquals(0xFF19A972.toInt(), list[1].color)
         assertEquals("Ny musik", list[1].tagline)
     }

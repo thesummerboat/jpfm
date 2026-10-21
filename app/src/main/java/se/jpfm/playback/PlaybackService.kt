@@ -501,7 +501,15 @@ class PlaybackService : MediaLibraryService() {
         errorCount++
         val decoder = error.errorCode in DECODER_ERRORS
         val network = error.errorCode in NETWORK_ERRORS
+        val station = ExtItems.station(item)
         when {
+            // Radiokanal som inte svarar på huvudadressen: prova reservadressen.
+            station != null && station.altUrl != null && item.localConfiguration?.uri?.toString() != station.altUrl -> {
+                val alt = ExtItems.live(station.copy(streamUrl = station.altUrl, hls = station.altUrl.contains(".m3u8")))
+                player.replaceMediaItem(index, alt.buildUpon().setMediaId(item.mediaId).build())
+                player.prepare()
+                player.play()
+            }
             // Telefonen klarar inte filen (t.ex. ALAC eller ovanlig FLAC): låt Plex koda om.
             decoder && !TrackItems.isTranscoded(item) && graph.session.isReady -> {
                 val transcoded = TrackItems.asTranscoded(item) ?: return
@@ -525,7 +533,8 @@ class PlaybackService : MediaLibraryService() {
                     }
                 }
             }
-            player.hasNextMediaItem() && errorCount <= 6 -> {
+            // Radio hoppar inte till nästa kanal av sig själv.
+            station == null && player.hasNextMediaItem() && errorCount <= 6 -> {
                 player.seekToNextMediaItem()
                 player.prepare()
                 player.play()
