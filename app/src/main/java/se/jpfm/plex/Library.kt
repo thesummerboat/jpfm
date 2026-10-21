@@ -2,6 +2,7 @@ package se.jpfm.plex
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import se.jpfm.plex.PlexClient.Companion.enc
@@ -13,8 +14,11 @@ data class Genre(val id: String, val title: String)
 /** En låt på en topplista (artist och titel), som vi letar efter i ditt bibliotek. */
 data class ChartSong(val artist: String, val title: String, val artwork: String? = null)
 
-/** En låt från topplistan som finns hos dig, med placeringen på listan. */
-data class ChartHit(val rank: Int, val track: Track)
+/**
+ * En plats på topplistan. [track] finns om låten finns i ditt bibliotek, annars kanske
+ * [artist] (då kan vi spela artistradio i stället).
+ */
+data class ChartHit(val rank: Int, val song: ChartSong, val track: Track? = null, val artist: Artist? = null)
 
 /**
  * En mix eller kategori: låtar som matchar ett Plex-filter, spelade i slumpvis ordning och
@@ -328,24 +332,26 @@ class Library(private val session: PlexSession) {
         list.filter { it in 1900..2100 }.distinct().sortedDescending().map { Mix.decade(it) }
     }
 
-    /** Låtar ur en topplista som finns i ditt bibliotek (samma artist och titel), med placering. */
+    /**
+     * Hela topplistan, med låten (eller åtminstone artisten) i ditt bibliotek där den finns.
+     * Vi söker bara efter låtar av artister du har, så det blir få anrop.
+     */
     suspend fun matchChart(chart: List<ChartSong>): List<ChartHit> = cached("chart:${chart.hashCode()}", 60 * MIN) {
         val artists = artists().associateBy { norm(it.title) }
-        val wanted = chart.mapIndexedNotNull { i, song ->
-            val a = chartArtistNames(song.artist).firstNotNullOfOrNull { artists[norm(it)] } ?: return@mapIndexedNotNull null
-            Triple(i + 1, song, a)
-        }
         coroutineScope {
-            wanted.map { (rank, song, a) ->
+            chart.mapIndexed { i, song ->
+                val a = chartArtistNames(song.artist).firstNotNullOfOrNull { artists[norm(it)] }
                 async {
-                    val title = song.title.substringBefore(" (").substringBefore(" - ").trim()
-                    runCatching {
-                        Parse.tracks(get("/library/sections/${sec()}/all?type=10&artist.id=${a.ratingKey}&title=${enc(title.take(40))}&X-Plex-Container-Start=0&X-Plex-Container-Size=5"))
-                            .firstOrNull { sameTitle(it.title, title) }
-                            ?.let { ChartHit(rank, it) }
-                    }.getOrNull()
+                    val track = if (a == null) null else {
+                        val title = song.title.substringBefore(" (").substringBefore(" - ").trim()
+                        runCatching {
+                            Parse.tracks(get("/library/sections/${sec()}/all?type=10&artist.id=${a.ratingKey}&title=${enc(title.take(40))}&X-Plex-Container-Start=0&X-Plex-Container-Size=5"))
+                                .firstOrNull { sameTitle(it.title, title) }
+                        }.getOrNull()
+                    }
+                    ChartHit(i + 1, song, track, a)
                 }
-            }.mapNotNull { it.await() }.distinctBy { it.track.ratingKey }
+            }.awaitAll()
         }
     }
 

@@ -185,16 +185,20 @@ private fun LazyListScope.tileSection(vm: AppViewModel, key: String, title: Stri
 
 // ---------- Topplistor ----------
 
-/** Hela topplistan: hett i Sverige (låtarna som finns hos dig) eller det du spelat mest. */
+/** Hela topplistan: hett i Sverige eller det du spelat mest. */
 @Composable
 fun HotListScreen(vm: AppViewModel, which: String) {
     val g = LocalGraph.current
     val sweden = which == QueueBuilder.HOT_SWEDEN
     val title = if (sweden) "Hett i Sverige" else "Hett hos dig"
-    val list = rememberLoadable("hot", which, keep = "home:hot:$which") { force ->
-        if (sweden) g.library.matchChart(g.charts.sweden(force)).map { it.rank to it.track }
-        else g.library.hotForYou(force = force).mapIndexed { i, t -> i + 1 to t }
+    val chart = rememberLoadable("hot-se-all", sweden, keep = "hot:se:all") { force ->
+        if (sweden) g.library.matchChart(g.charts.sweden(force)) else emptyList()
     }
+    val mine = rememberLoadable("hot-me-all", sweden, keep = "hot:me:all") { force ->
+        if (sweden) emptyList() else g.library.hotForYou(force = force)
+    }
+    val tracks = if (sweden) chart.data.orEmpty().mapNotNull { it.track }.distinctBy { it.ratingKey } else mine.data.orEmpty()
+    val state: Load<*> = if (sweden) chart.state else mine.state
     val color = if (sweden) Color(0xFFE5577A) else Jp.AccentDeep
 
     DetailScaffold(title, onBack = { vm.nav.back() }, barColor = color.darken()) {
@@ -209,39 +213,37 @@ fun HotListScreen(vm: AppViewModel, which: String) {
                 Text(title, style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Black, color = Color.White)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    if (sweden) "Det som spelas mest i Sverige just nu – de låtar som finns i ditt bibliotek. Uppdateras varje dag."
+                    if (sweden) "Det som spelas mest i Sverige just nu. Låtarna som finns i ditt bibliotek går att spela, och för artister du har blir det artistradio."
                     else "Det du lyssnat mest på de senaste 30 dagarna, i alla dina appar.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color.White.copy(alpha = 0.8f),
                 )
-                val tracks = list.data?.map { it.second }.orEmpty()
                 if (tracks.isNotEmpty()) {
                     Spacer(Modifier.height(18.dp))
                     PlayRow(
                         onPlay = { vm.playTracks(tracks, 0, title) },
                         onShuffle = { vm.playTracks(tracks, 0, title, shuffle = true) },
+                        playLabel = if (sweden) "Spela ${tracks.size} låtar" else "Spela",
                     )
                 }
             }
         }
-        when (val st = list.state) {
+        when (state) {
             is Load.Loading -> item(key = "l") { LoadingBox() }
-            is Load.Failed -> item(key = "e") { ErrorBox(st.message) { list.retry() } }
-            is Load.Ready -> {
-                if (st.data.isEmpty()) {
-                    item(key = "empty") {
-                        EmptyBox(
-                            Icons.Rounded.Album,
-                            "Inget här än",
-                            if (sweden) "Ingen av låtarna på topplistan finns i ditt bibliotek just nu."
-                            else "Lyssna lite till så dyker dina favoriter upp här.",
-                        )
-                    }
+            is Load.Failed -> item(key = "e") { ErrorBox(state.message) { if (sweden) chart.retry() else mine.retry() } }
+            is Load.Ready -> if (sweden) {
+                val list = chart.data.orEmpty()
+                if (list.isEmpty()) item(key = "empty") { EmptyBox(Icons.Rounded.Album, "Topplistan svarar inte", "Försök igen om en stund.") }
+                itemsIndexed(list, key = { _, h -> "se:${h.rank}" }) { _, hit ->
+                    ChartHitRow(vm, list, hit, Modifier.padding(horizontal = 8.dp))
                 }
-                val tracks = st.data.map { it.second }
-                itemsIndexed(st.data, key = { _, (_, t) -> t.ratingKey }) { i, (rank, t) ->
+            } else {
+                if (tracks.isEmpty()) {
+                    item(key = "empty") { EmptyBox(Icons.Rounded.Album, "Inget här än", "Lyssna lite till så dyker dina favoriter upp här.") }
+                }
+                itemsIndexed(tracks, key = { _, t -> t.ratingKey }) { i, t ->
                     RankedTrack(
-                        rank = rank,
+                        rank = i + 1,
                         track = t,
                         isCurrent = vm.player.current?.ratingKey == t.ratingKey,
                         onClick = { vm.playTracks(tracks, i, title) },

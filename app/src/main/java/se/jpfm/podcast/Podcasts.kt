@@ -366,7 +366,7 @@ class PodcastRepository(private val http: OkHttpClient, dir: File) {
     /** Topplistan i Sverige. */
     suspend fun topList(): List<Podcast> {
         top?.let { (at, l) -> if (System.currentTimeMillis() - at < 6 * HOUR && l.isNotEmpty()) return l }
-        val ids = PodcastParse.topIds(JSONObject(get("https://rss.applemarketingtools.com/api/v2/se/podcasts/top/30/podcasts.json")))
+        val ids = PodcastParse.topIds(JSONObject(get("https://rss.marketingtools.apple.com/api/v2/se/podcasts/top/30/podcasts.json")))
         if (ids.isEmpty()) return emptyList()
         val found = PodcastParse.itunesWithIds(JSONObject(get("https://itunes.apple.com/lookup?entity=podcast&id=${ids.joinToString(",")}")))
         // Behåll topplistans ordning.

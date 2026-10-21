@@ -23,6 +23,7 @@ import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Headset
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Radio
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -31,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
@@ -42,6 +44,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import se.jpfm.plex.ChartHit
 import se.jpfm.plex.Mix
 import se.jpfm.plex.Track
 import se.jpfm.podcast.Episode
@@ -186,7 +189,6 @@ fun MixCard(mix: Mix, index: Int, onClick: () -> Unit, onLongClick: (() -> Unit)
 }
 
 /** Låt på en topplista: placering, omslag, titel och artist. */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun RankedTrack(
     rank: Int,
@@ -196,13 +198,63 @@ fun RankedTrack(
     onMore: () -> Unit,
     modifier: Modifier = Modifier,
     extra: String? = null,
+) = RankRow(
+    rank = rank,
+    thumb = track.thumb,
+    title = track.title,
+    subtitle = listOfNotNull(track.displayArtist, extra).joinToString(" · "),
+    isCurrent = isCurrent,
+    onClick = onClick,
+    onMore = onMore,
+    modifier = modifier,
+)
+
+/**
+ * En plats på topplistan i Sverige. Finns låten hos dig spelas den; finns bara artisten blir
+ * det artistradio; annars visas den nedtonad.
+ */
+@Composable
+fun ChartEntry(hit: ChartHit, isCurrent: Boolean, onClick: () -> Unit, onMore: (() -> Unit)?, modifier: Modifier = Modifier) {
+    val t = hit.track
+    RankRow(
+        rank = hit.rank,
+        thumb = t?.thumb ?: hit.song.artwork?.replace("100x100bb", "300x300bb"),
+        title = t?.title ?: hit.song.title,
+        subtitle = when {
+            t != null -> t.displayArtist
+            hit.artist != null -> "${hit.song.artist} · artistradio"
+            else -> "${hit.song.artist} · finns inte hos dig"
+        },
+        isCurrent = isCurrent,
+        onClick = onClick,
+        onMore = onMore,
+        modifier = modifier,
+        dim = t == null,
+        badge = if (t == null && hit.artist != null) Icons.Rounded.Radio else null,
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun RankRow(
+    rank: Int,
+    thumb: String?,
+    title: String,
+    subtitle: String,
+    isCurrent: Boolean,
+    onClick: () -> Unit,
+    onMore: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    dim: Boolean = false,
+    badge: ImageVector? = null,
 ) {
     Row(
         modifier
             .fillMaxWidth()
+            .height(58.dp)
             .clip(RoundedCornerShape(8.dp))
             .combinedClickable(onClick = onClick, onLongClick = onMore)
-            .padding(vertical = 3.dp),
+            .alpha(if (dim) 0.55f else 1f),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -213,25 +265,31 @@ fun RankedTrack(
             textAlign = TextAlign.Center,
             modifier = Modifier.width(34.dp),
         )
-        Artwork(track.thumb, Modifier.size(50.dp), size = 150, shape = RoundedCornerShape(6.dp))
+        Box {
+            Artwork(thumb, Modifier.size(50.dp), size = 150, shape = RoundedCornerShape(6.dp))
+            if (badge != null) {
+                Box(
+                    Modifier.align(Alignment.BottomEnd).padding(3.dp).size(18.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.6f)),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(badge, null, tint = Color.White, modifier = Modifier.size(12.dp)) }
+            }
+        }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(
-                track.title,
+                title,
                 style = MaterialTheme.typography.bodyLarge,
                 color = if (isCurrent) Jp.Accent else Jp.Text,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                listOfNotNull(track.displayArtist, extra).joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                color = Jp.TextDim,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = Jp.TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        IconButton(onClick = onMore) { Icon(Icons.Rounded.MoreVert, "Mer", tint = Jp.TextDim) }
+        if (onMore != null) {
+            IconButton(onClick = onMore) { Icon(Icons.Rounded.MoreVert, "Mer", tint = Jp.TextDim) }
+        } else {
+            Spacer(Modifier.width(12.dp))
+        }
     }
 }
 

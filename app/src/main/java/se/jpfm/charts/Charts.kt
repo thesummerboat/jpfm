@@ -45,7 +45,7 @@ class ChartRepository(private val http: OkHttpClient, dir: File) {
 
     companion object {
         private const val TTL = 6 * 60 * 60 * 1000L
-        const val URL_SE = "https://rss.applemarketingtools.com/api/v2/se/music/most-played/100/songs.json"
+        const val URL_SE = "https://rss.marketingtools.apple.com/api/v2/se/music/most-played/100/songs.json"
     }
 }
 

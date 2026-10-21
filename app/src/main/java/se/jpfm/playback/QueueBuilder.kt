@@ -126,10 +126,10 @@ class QueueBuilder(private val g: AppGraph) {
     suspend fun hot(which: String, start: Int = 0): BuiltQueue {
         if (!online()) throw IOException("Topplistan behöver kontakt med servern")
         val (title, tracks) = when (which) {
-            HOT_SWEDEN -> "Hett i Sverige" to library.matchChart(g.charts.sweden()).map { it.track }
+            HOT_SWEDEN -> "Hett i Sverige" to library.matchChart(g.charts.sweden()).mapNotNull { it.track }.distinctBy { it.ratingKey }
             else -> "Hett hos dig" to library.hotForYou()
         }
-        if (tracks.isEmpty()) throw IOException("Inga låtar på topplistan ännu")
+        if (tracks.isEmpty()) throw IOException(if (which == HOT_SWEDEN) "Inga av låtarna på topplistan finns i ditt bibliotek" else "Lyssna lite till, så fylls listan på")
         return BuiltQueue(tracks, start.coerceIn(0, tracks.size - 1), QueueContext(QueueContext.Kind.TRACKS, title))
     }
 

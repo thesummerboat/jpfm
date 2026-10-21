@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import se.jpfm.playback.QueueBuilder
 import se.jpfm.playback.QueueContext
 import se.jpfm.plex.Album
+import se.jpfm.plex.ChartHit
 import se.jpfm.plex.Artist
 import se.jpfm.plex.Hub
 import se.jpfm.plex.Mix
@@ -72,6 +73,7 @@ import se.jpfm.ui.AlbumCard
 import se.jpfm.ui.AppViewModel
 import se.jpfm.ui.Artwork
 import se.jpfm.ui.CategoryTile
+import se.jpfm.ui.ChartEntry
 import se.jpfm.ui.EmptyBox
 import se.jpfm.ui.EpisodeCard
 import se.jpfm.ui.ErrorBox
@@ -141,7 +143,7 @@ fun HomeScreen(vm: AppViewModel) {
         if (online) g.library.hotForYou().mapIndexed { i, t -> i + 1 to t } else emptyList()
     }
     val hotSe = rememberLoadable("hotse", section, online, epoch, keep = "home:hot:se:$k") {
-        if (online) g.library.matchChart(g.charts.sweden()).map { it.rank to it.track } else emptyList()
+        if (online) g.library.matchChart(g.charts.sweden()) else emptyList()
     }
     val releases = rememberLoadable("releases", section, online, epoch, keep = "home:releases:$k") { if (online) g.library.newReleases() else emptyList() }
     val rediscover = rememberLoadable("rediscover", section, online, epoch, keep = "home:rediscover:$k") { if (online) g.library.rediscover() else emptyList() }
@@ -262,12 +264,7 @@ fun HomeScreen(vm: AppViewModel) {
 
             // ----- Topplistor, nytt och resten av biblioteket -----
             if (music && online) {
-                item(key = "hot-se") {
-                    HotRow(
-                        vm, "Hett i Sverige just nu", "Från topplistan – låtarna som finns hos dig",
-                        hotSe.data.orEmpty(), QueueBuilder.HOT_SWEDEN,
-                    )
-                }
+                item(key = "hot-se") { ChartRow(vm, hotSe.data.orEmpty()) }
                 item(key = "releases") {
                     AlbumsRow(vm, "Nya släpp", "Senast utgivet i ditt bibliotek", releases.data.orEmpty())
                 }
@@ -434,6 +431,52 @@ private fun HotRow(vm: AppViewModel, title: String, subtitle: String, list: List
             }
         }
     }
+}
+
+/** Topplistan i Sverige: det som är hett just nu, spelbart där låten finns hos dig. */
+@Composable
+private fun ChartRow(vm: AppViewModel, chart: List<ChartHit>) {
+    if (chart.isEmpty()) return
+    val have = chart.count { it.track != null }
+    SectionHeader(
+        "Hett i Sverige just nu",
+        subtitle = if (have > 0) "Topplistan · ${Format.tracks(have)} finns hos dig" else "Topplistan · tryck för artistradio",
+        action = "Visa alla",
+    ) { vm.nav.push(Screen.HotList(QueueBuilder.HOT_SWEDEN)) }
+    LazyRow(contentPadding = PaddingValues(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        itemsIndexed(chart.take(20).chunked(4), key = { i, _ -> "chart:$i" }) { _, chunk ->
+            Column(Modifier.fillParentMaxWidth(0.9f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                chunk.forEach { hit -> ChartHitRow(vm, chart, hit) }
+            }
+        }
+    }
+}
+
+/** En rad på topplistan, med vad som händer när man trycker (låt, artistradio eller inget). */
+@Composable
+fun ChartHitRow(vm: AppViewModel, chart: List<ChartHit>, hit: ChartHit, modifier: Modifier = Modifier) {
+    val t = hit.track
+    val a = hit.artist
+    ChartEntry(
+        hit,
+        isCurrent = t != null && vm.player.current?.ratingKey == t.ratingKey,
+        onClick = {
+            when {
+                t != null -> {
+                    val tracks = chart.mapNotNull { it.track }.distinctBy { it.ratingKey }
+                    vm.playTracks(tracks, tracks.indexOfFirst { it.ratingKey == t.ratingKey }.coerceAtLeast(0), "Hett i Sverige")
+                }
+                a != null -> vm.artistRadio(a)
+                else -> vm.toast("${hit.song.title} finns inte i ditt bibliotek")
+            }
+        },
+        onMore = when {
+            t != null -> ({ vm.menu = MenuTarget.ForTrack(t) })
+            a != null -> ({ vm.menu = MenuTarget.ForArtist(a) })
+            else -> null
+        },
+        modifier = modifier,
+    )
 }
 
 @Composable
