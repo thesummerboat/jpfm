@@ -83,4 +83,12 @@ class DiscoverTest {
         assertEquals("genre=42", m.albumFilter)
         assertEquals("Kent, Laleh med flera", m.subtitle)
     }
+
+    @Test
+    fun filterFallbacks() {
+        assertEquals(listOf("mood=5", "artist.mood=5"), Library.filterAlternatives("album.mood=5"))
+        assertEquals(listOf("genre=7", "artist.genre=7"), Library.filterAlternatives("album.genre=7"))
+        assertEquals(emptyList<String>(), Library.filterAlternatives("album.decade=1990"))
+        assertEquals(emptyList<String>(), Library.filterAlternatives("viewCount>>=2"))
+    }
 }

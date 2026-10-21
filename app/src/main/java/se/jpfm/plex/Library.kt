@@ -215,7 +215,15 @@ class Library(private val session: PlexSession) {
      * "album.decade=1990". Grunden för mixar som fylls på av sig själva.
      */
     suspend fun randomTracksWhere(filter: String, count: Int = 80): List<Track> = withContext(Dispatchers.Default) {
-        Parse.tracks(get("/library/sections/${sec()}/all?type=10&$filter&sort=random&X-Plex-Container-Start=0&X-Plex-Container-Size=$count"))
+        suspend fun query(f: String) =
+            Parse.tracks(get("/library/sections/${sec()}/all?type=10&$f&sort=random&X-Plex-Container-Start=0&X-Plex-Container-Size=$count"))
+        val first = runCatching { query(filter) }
+        first.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
+        // Alla servrar har inte stämning och genre på samma nivå: prova låtens och artistens.
+        for (alt in filterAlternatives(filter)) {
+            runCatching { query(alt) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return@withContext it }
+        }
+        first.getOrThrow()
     }
 
     // ---------- Upptäck (hemskärmen) ----------
@@ -423,6 +431,13 @@ class Library(private val session: PlexSession) {
             .replace(Regex("""\s(feat|ft)\.?\s.*"""), "")
             .replace(Regex("""^the\s"""), "")
             .replace(Regex("""[^\p{L}\p{N}]"""), "")
+
+        /** "album.mood=5" → ["mood=5", "artist.mood=5"]: andra nivåer att leta på om den första är tom. */
+        fun filterAlternatives(filter: String): List<String> {
+            if (!filter.startsWith("album.")) return emptyList()
+            val rest = filter.removePrefix("album.")
+            return if (rest.startsWith("decade=") || rest.startsWith("year=")) emptyList() else listOf(rest, "artist.$rest")
+        }
 
         /** Samma låt, även om den ena heter "Låt (Remastered)" eller "Låt - Radio Edit". */
         fun sameTitle(a: String, b: String): Boolean {
