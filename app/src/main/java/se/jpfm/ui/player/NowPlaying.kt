@@ -71,7 +71,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -566,7 +565,7 @@ private fun LyricsPanel(vm: AppViewModel, track: Track, accent: Color) {
 private fun SyncedLyrics(l: Lyrics, position: Long, onSeek: (Long) -> Unit) {
     val state = rememberLazyListState()
     // Visa raden en aning innan den sjungs.
-    val current by remember(l) { derivedStateOf { l.indexAt(position + 350) } }
+    val current = l.indexAt(position + 350)
     var userScrollAt by remember { mutableLongStateOf(0L) }
     LaunchedEffect(state.isScrollInProgress) {
         if (state.isScrollInProgress) userScrollAt = System.currentTimeMillis()
