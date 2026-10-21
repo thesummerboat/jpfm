@@ -140,7 +140,7 @@ class PlaybackService : MediaLibraryService() {
             saved.context?.let { player.playlistMetadata = QueueBuilder.contextMetadata(it) }
             player.shuffleModeEnabled = saved.shuffle
             player.repeatMode = saved.repeatMode
-            player.prepare()
+            // Inte prepare(): utan nät skulle spelaren annars börja hoppa mellan låtar. Play startar den.
         }
     }
 
@@ -292,6 +292,8 @@ class PlaybackService : MediaLibraryService() {
 
     private fun handleError(error: PlaybackException) {
         val item = player.currentMediaItem ?: return
+        // Bara när du faktiskt vill lyssna – annars väntar felet tills du trycker på spela.
+        if (!player.playWhenReady) return
         val index = player.currentMediaItemIndex
         val position = player.currentPosition
         if (item.mediaId != lastErrorId) {
