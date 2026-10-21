@@ -1,9 +1,11 @@
 package se.jpfm.ui
 
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -90,6 +92,8 @@ fun JpfmTheme(content: @Composable () -> Unit) {
             error = Jp.Error,
         ),
         typography = typography,
-        content = content,
-    )
+    ) {
+        // Utan detta blir text och ikoner svarta överallt där ingen Surface sätter färgen.
+        CompositionLocalProvider(LocalContentColor provides Jp.Text, content = content)
+    }
 }

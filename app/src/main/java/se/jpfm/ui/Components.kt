@@ -293,37 +293,59 @@ private val stationGradients = listOf(
 
 /** Radiostation eller mix: ett färgkort som ser ut som en knapp att starta musik med. */
 @Composable
-fun StationCard(station: Station, index: Int, onClick: () -> Unit, width: Dp = 168.dp) {
+fun StationCard(station: Station, index: Int, onClick: () -> Unit, width: Dp = 176.dp) =
+    RadioCard(station.title, "RADIO", station.thumb, index, onClick, width)
+
+/**
+ * Kort som startar radio: färgad botten, omslaget tonat in från höger och titeln nere till
+ * vänster (som "Mixar för dig" i Spotify).
+ */
+@Composable
+fun RadioCard(
+    title: String,
+    label: String,
+    thumb: String?,
+    index: Int,
+    onClick: () -> Unit,
+    width: Dp = 176.dp,
+    icon: ImageVector = Icons.Rounded.Radio,
+) {
     val colors = stationGradients[index % stationGradients.size]
     Box(
         Modifier
             .width(width)
-            .height(104.dp)
+            .height(112.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(Brush.linearGradient(colors))
-            .combinedClickableCompat(onClick)
-            .padding(14.dp),
+            .combinedClickableCompat(onClick),
     ) {
-        if (station.thumb != null) {
+        if (thumb != null) {
             Artwork(
-                station.thumb,
-                Modifier.align(Alignment.BottomEnd).size(54.dp),
-                size = 160,
-                shape = RoundedCornerShape(8.dp),
-                placeholder = Icons.Rounded.Radio,
+                thumb,
+                Modifier.align(Alignment.CenterEnd).size(112.dp),
+                size = 336,
+                shape = RoundedCornerShape(0.dp),
+                placeholder = icon,
+            )
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .background(Brush.horizontalGradient(0.25f to colors[0], 0.85f to colors[0].copy(alpha = 0.35f), 1f to Color.Transparent)),
             )
         } else {
-            Icon(Icons.Rounded.Radio, null, tint = Color.White.copy(alpha = 0.55f), modifier = Modifier.align(Alignment.BottomEnd).size(30.dp))
+            Icon(icon, null, tint = Color.White.copy(alpha = 0.35f), modifier = Modifier.align(Alignment.TopEnd).padding(12.dp).size(34.dp))
         }
-        Text(
-            station.title,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = Color.White,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.align(Alignment.TopStart).fillMaxWidth(if (station.thumb != null) 0.95f else 0.85f),
-        )
+        Column(Modifier.align(Alignment.BottomStart).padding(14.dp).fillMaxWidth(0.82f)) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.8f))
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 

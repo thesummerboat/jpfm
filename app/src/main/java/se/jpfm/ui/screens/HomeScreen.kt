@@ -67,6 +67,8 @@ import se.jpfm.ui.LocalGraph
 import se.jpfm.ui.MenuTarget
 import se.jpfm.ui.MusicItemCard
 import se.jpfm.ui.OfflineBanner
+import se.jpfm.ui.RadioCard
+import se.jpfm.ui.StationCard
 import se.jpfm.ui.Screen
 import se.jpfm.ui.SectionHeader
 import se.jpfm.ui.Tab
@@ -126,12 +128,17 @@ fun HomeScreen(vm: AppViewModel) {
             }
             item(key = "quick") { QuickActions(vm, online) }
             if (online) {
+                // Radio först: det man oftast vill starta (och i bilen).
+                item(key = "radio") { RadioRow(vm, hubs.data.orEmpty()) }
                 when (val st = hubs.state) {
                     is Load.Loading -> item(key = "loading") { LoadingBox() }
                     is Load.Failed -> item(key = "err") { ErrorBox(st.message) { hubs.retry() } }
-                    is Load.Ready -> st.data.forEachIndexed { i, hub ->
-                        item(key = "hub:$i:${hub.identifier}") { HubRow(vm, hub) }
-                    }
+                    is Load.Ready -> st.data
+                        // Rader med bara stationer visas redan under Radio.
+                        .filter { h -> !h.items.all { it is Station } }
+                        .forEachIndexed { i, hub ->
+                            item(key = "hub:$i:${hub.identifier}") { HubRow(vm, hub) }
+                        }
                 }
             } else {
                 item(key = "offline-hint") { OfflineHome(vm) }
@@ -199,6 +206,45 @@ private fun QuickTile(icon: ImageVector, text: String, modifier: Modifier, highl
         Icon(icon, null, tint = if (highlight) Color.White else Jp.Accent, modifier = Modifier.size(22.dp))
         Spacer(Modifier.width(10.dp))
         Text(text, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/**
+ * Radio: hela biblioteket blandat, Plex egna stationer och mixar, artistradio för artister du
+ * lyssnat på och låtradio från senast spelade låtar. Allt fyller på sig självt.
+ */
+@Composable
+private fun RadioRow(vm: AppViewModel, hubs: List<Hub>) {
+    val items = hubs.flatMap { it.items }
+    val stations = items.filterIsInstance<Station>().distinctBy { it.key }
+    val artists = buildList {
+        items.forEach { m ->
+            when (m) {
+                is Artist -> add(Triple(m.ratingKey, m.title, m.thumb))
+                is Album -> m.artistKey?.let { add(Triple(it, m.artist, m.thumb)) }
+                is Track -> m.artistKey?.let { add(Triple(it, m.artist, m.thumb)) }
+                else -> Unit
+            }
+        }
+    }.filter { it.second.isNotBlank() && !it.second.equals("Various Artists", ignoreCase = true) }
+        .distinctBy { it.first }
+        .take(8)
+    val tracks = items.filterIsInstance<Track>().distinctBy { it.ratingKey }.take(4)
+
+    SectionHeader("Radio")
+    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        item(key = "library") {
+            RadioCard("Hela biblioteket", "BLANDAD RADIO", null, 0, onClick = { vm.shuffleLibrary() }, icon = Icons.Rounded.Shuffle)
+        }
+        itemsIndexed(stations, key = { _, st -> "st:${st.key}" }) { i, st ->
+            StationCard(st, i + 1) { vm.playStation(st) }
+        }
+        itemsIndexed(artists, key = { _, a -> "ar:${a.first}" }) { i, (key, name, thumb) ->
+            RadioCard(name, "ARTISTRADIO", thumb, i + stations.size + 1, onClick = { vm.artistRadio(Artist(key, name, thumb)) })
+        }
+        itemsIndexed(tracks, key = { _, t -> "tr:${t.ratingKey}" }) { i, t ->
+            RadioCard("Mer som ${t.title}", "LÅTRADIO", t.thumb, i + stations.size + artists.size + 1, onClick = { vm.sonicRadio(t) })
+        }
     }
 }
 
