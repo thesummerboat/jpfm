@@ -73,6 +73,7 @@ class DiscoverTest {
         assertEquals("60-talet", Mix.decadeName(1960))
         assertEquals("2000-talet", Mix.decadeName(2000))
         assertEquals("2010-talet", Mix.decadeName(2010))
+        assertEquals("1900-talet", Mix.decadeName(1900))
         assertEquals("album.decade=1980", Mix.decade(1980).trackFilter)
     }
 

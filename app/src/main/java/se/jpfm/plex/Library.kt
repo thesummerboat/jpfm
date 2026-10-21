@@ -4,6 +4,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import se.jpfm.plex.PlexClient.Companion.enc
 import java.io.IOException
@@ -57,7 +61,7 @@ data class Mix(
         )
 
         /** 1990 → "90-talet", 2010 → "2010-talet". */
-        fun decadeName(year: Int): String = if (year < 2000) "${year % 100}-talet" else "$year-talet"
+        fun decadeName(year: Int): String = if (year in 1910..1999) "${year % 100}-talet" else "$year-talet"
     }
 }
 
@@ -77,6 +81,7 @@ class Library(private val session: PlexSession) {
 
     private data class Entry(val at: Long, val value: Any)
     private val cache = ConcurrentHashMap<String, Entry>()
+    private val locks = ConcurrentHashMap<String, Mutex>()
 
     @Suppress("UNCHECKED_CAST")
     private suspend fun <T : Any> cached(key: String, ttlMs: Long, force: Boolean = false, load: suspend () -> T): T {
@@ -84,10 +89,18 @@ class Library(private val session: PlexSession) {
         val k = "$sec|$key"
         val hit = cache[k]
         if (!force && hit != null && System.currentTimeMillis() - hit.at < ttlMs) return hit.value as T
-        // Tolkningen av långa listor (tusentals artister) körs utanför huvudtråden.
-        val v = withContext(Dispatchers.Default) { load() }
-        cache[k] = Entry(System.currentTimeMillis(), v)
-        return v
+        // En hämtning åt gången per nyckel: hemskärmen och bilen frågar ofta efter samma sak samtidigt.
+        return locks.getOrPut(k) { Mutex() }.withLock {
+            val again = cache[k]
+            if (!force && again != null && again !== hit && System.currentTimeMillis() - again.at < ttlMs) {
+                again.value as T
+            } else {
+                // Tolkningen av långa listor (tusentals artister) körs utanför huvudtråden.
+                val v = withContext(Dispatchers.Default) { load() }
+                cache[k] = Entry(System.currentTimeMillis(), v)
+                v
+            }
+        }
     }
 
     fun peekTrackDetails(ratingKey: String): TrackDetails? =
@@ -230,7 +243,7 @@ class Library(private val session: PlexSession) {
 
     /** Album som matchar ett Plex-filter, mest spelade först. */
     suspend fun albumsWhere(filter: String, force: Boolean = false): List<Album> = cached("albumsWhere:$filter", 30 * MIN, force) {
-        Parse.albums(get("/library/sections/${sec()}/all?type=9&$filter&sort=viewCount:desc,titleSort&X-Plex-Container-Start=0&X-Plex-Container-Size=2000"))
+        Parse.albums(get("/library/sections/${sec()}/all?type=9&$filter&sort=viewCount:desc,titleSort&X-Plex-Container-Start=0&X-Plex-Container-Size=5000"))
     }
 
     /** Album du spelat senast. */
@@ -259,7 +272,7 @@ class Library(private val session: PlexSession) {
      */
     suspend fun hotForYou(days: Int = 30, force: Boolean = false): List<Track> = cached("hot:$days", 20 * MIN, force) {
         val since = System.currentTimeMillis() / 1000 - days * 86_400L
-        val mc = get("/status/sessions/history/all?sort=viewedAt:desc&librarySectionID=${sec()}&viewedAt>=$since&X-Plex-Container-Start=0&X-Plex-Container-Size=2000")
+        val mc = get("/status/sessions/history/all?sort=viewedAt:desc&accountID=1&librarySectionID=${sec()}&viewedAt>=$since&X-Plex-Container-Start=0&X-Plex-Container-Size=2000")
             .container()
         val counts = LinkedHashMap<String, Int>()
         for (o in mc.objects("Metadata")) {
@@ -291,8 +304,8 @@ class Library(private val session: PlexSession) {
                 minOf(1, out.size),
                 Mix(
                     title = "Dina favoriter",
-                    trackFilter = "viewCount>>=2",
-                    subtitle = "Det du spelat mest, i ny ordning",
+                    trackFilter = "viewCount>>=1",
+                    subtitle = "Låtar du spelat flera gånger, i ny ordning",
                     thumb = played.firstOrNull()?.thumb,
                     label = "Favoriter",
                 ),
@@ -346,11 +359,13 @@ class Library(private val session: PlexSession) {
      */
     suspend fun matchChart(chart: List<ChartSong>): List<ChartHit> = cached("chart:${chart.hashCode()}", 60 * MIN) {
         val artists = artists().associateBy { norm(it.title) }
+        // Högst fyra sökningar åt gången, så att det du trycker på i appen inte får vänta.
+        val gate = Semaphore(4)
         coroutineScope {
             chart.mapIndexed { i, song ->
                 val a = chartArtistNames(song.artist).firstNotNullOfOrNull { artists[norm(it)] }
                 async {
-                    val track = if (a == null) null else {
+                    val track = if (a == null) null else gate.withPermit {
                         val title = song.title.substringBefore(" (").substringBefore(" - ").trim()
                         runCatching {
                             Parse.tracks(get("/library/sections/${sec()}/all?type=10&artist.id=${a.ratingKey}&title=${enc(title.take(40))}&X-Plex-Container-Start=0&X-Plex-Container-Size=5"))
@@ -426,11 +441,17 @@ class Library(private val session: PlexSession) {
         private const val MIN = 60_000L
 
         /** Gör namn jämförbara: små bokstäver, utan parenteser, "feat." och skiljetecken. */
+        private val BRACKETS = Regex("""\(.*?\)|\[.*?]""")
+        private val FEAT = Regex("""\s(feat|ft)\.?\s.*""")
+        private val THE = Regex("""^the\s""")
+        private val NON_WORD = Regex("""[^\p{L}\p{N}]""")
+        private val ARTIST_SPLIT = Regex("""\s(&|x|X|feat\.?|ft\.?|med|with)\s|,""")
+
         fun norm(s: String): String = s.lowercase()
-            .replace(Regex("""\(.*?\)|\[.*?]"""), "")
-            .replace(Regex("""\s(feat|ft)\.?\s.*"""), "")
-            .replace(Regex("""^the\s"""), "")
-            .replace(Regex("""[^\p{L}\p{N}]"""), "")
+            .replace(BRACKETS, "")
+            .replace(FEAT, "")
+            .replace(THE, "")
+            .replace(NON_WORD, "")
 
         /** "album.mood=5" → ["mood=5", "artist.mood=5"]: andra nivåer att leta på om den första är tom. */
         fun filterAlternatives(filter: String): List<String> {
@@ -448,7 +469,7 @@ class Library(private val session: PlexSession) {
 
         /** "Artist A & Artist B", "A, B", "A x B", "A feat. B" → möjliga artistnamn. */
         fun chartArtistNames(artist: String): List<String> {
-            val first = artist.split(Regex("""\s(&|x|X|feat\.?|ft\.?|med|with)\s|,""")).first().trim()
+            val first = artist.split(ARTIST_SPLIT).first().trim()
             return listOf(artist.trim(), first).distinct()
         }
 

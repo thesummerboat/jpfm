@@ -12,6 +12,7 @@ import se.jpfm.plex.MusicItem
 import se.jpfm.plex.Playlist
 import se.jpfm.plex.Station
 import se.jpfm.plex.Track
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -85,7 +86,9 @@ class BrowseTree(private val g: AppGraph) {
         val out = mutableListOf<MediaItem>()
         out += playable(MediaIds.SHUFFLE_ALL, "Blanda hela biblioteket", "Slumpvis från all din musik", icon(R.drawable.ic_auto_shuffle), MediaMetadata.MEDIA_TYPE_PLAYLIST, group = "Starta")
         // Dina mixar: tar aldrig slut, perfekt i bilen.
-        val mixes = withTimeoutOrNull(5_000) { runCatching { g.library.mixes() }.getOrNull() }.orEmpty()
+        // Hämtningen får fortsätta i bakgrunden även om bilen inte orkar vänta, så finns mixarna nästa gång.
+        val loading = g.scope.async { runCatching { g.library.mixes() }.getOrNull() }
+        val mixes = withTimeoutOrNull(4_000) { loading.await() }.orEmpty()
         mixes.take(6).forEach { m ->
             out += playable(
                 MediaIds.playMix(m.trackFilter, m.title), m.title, m.subtitle ?: "Mix som fylls på av sig själv",

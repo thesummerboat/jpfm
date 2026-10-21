@@ -112,9 +112,11 @@ private val kept = java.util.concurrent.ConcurrentHashMap<String, Any>()
  */
 @Composable
 fun <T> rememberLoadable(vararg keys: Any?, keep: String? = null, load: suspend (force: Boolean) -> T): Loadable<T> {
-    val l = remember(*keys, keep) {
+    // Sparat per server och bibliotek, så att inget från en annan server visas efter ett byte.
+    val memo = keep?.let { "${LocalServer.current?.machineId}|${LocalGraph.current.session.section?.key}|$it" }
+    val l = remember(*keys, memo) {
         @Suppress("UNCHECKED_CAST")
-        val old = keep?.let { kept[it] } as T?
+        val old = memo?.let { kept[it] } as T?
         Loadable<T>(if (old != null) Load.Ready(old) else Load.Loading)
     }
     LaunchedEffect(l, l.trigger) {
@@ -123,7 +125,7 @@ fun <T> rememberLoadable(vararg keys: Any?, keep: String? = null, load: suspend 
         try {
             val v = load(force)
             l.state = Load.Ready(v)
-            if (keep != null && v != null) kept[keep] = v
+            if (memo != null && v != null) kept[memo] = v
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             if (l.state !is Load.Ready) l.state = Load.Failed(e.message ?: "Något gick fel")

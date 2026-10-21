@@ -327,9 +327,11 @@ class QueueBuilder(private val g: AppGraph) {
                 val filter = ctx.id ?: return emptyList()
                 val fresh = library.randomTracksWhere(filter, 60)
                 val unseen = fresh.filter { it.ratingKey !in have }
-                // En liten genre tar slut: börja om, men inte med det som just spelats.
-                val recent = existing.takeLast(25).map { it.ratingKey }.toHashSet()
-                return unseen.ifEmpty { fresh.filter { it.ratingKey !in recent } }
+                if (unseen.isNotEmpty()) return unseen
+                // En liten mix har spelat allt: börja om, men inte med det som just spelats.
+                val recent = existing.takeLast(minOf(25, fresh.size / 2)).map { it.ratingKey }.toHashSet()
+                val again = fresh.filter { it.ratingKey !in recent }
+                return again.ifEmpty { fresh.filter { it.ratingKey != existing.lastOrNull()?.ratingKey } }
             }
             else -> Unit
         }

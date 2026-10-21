@@ -191,10 +191,10 @@ fun HotListScreen(vm: AppViewModel, which: String) {
     val g = LocalGraph.current
     val sweden = which == QueueBuilder.HOT_SWEDEN
     val title = if (sweden) "Hett i Sverige" else "Hett hos dig"
-    val chart = rememberLoadable("hot-se-all", sweden, keep = "hot:se:all") { force ->
+    val chart = rememberLoadable("hot-se-all", sweden, keep = if (sweden) "hot:se:all" else null) { force ->
         if (sweden) g.library.matchChart(g.charts.sweden(force)) else emptyList()
     }
-    val mine = rememberLoadable("hot-me-all", sweden, keep = "hot:me:all") { force ->
+    val mine = rememberLoadable("hot-me-all", sweden, keep = if (sweden) null else "hot:me:all") { force ->
         if (sweden) emptyList() else g.library.hotForYou(force = force)
     }
     val tracks = if (sweden) chart.data.orEmpty().mapNotNull { it.track }.distinctBy { it.ratingKey } else mine.data.orEmpty()
