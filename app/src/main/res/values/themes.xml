@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.JPFM" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/jpfm_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:colorAccent">@color/jpfm_accent</item>
+    </style>
+
+    <color name="jpfm_background">#FF0B0D12</color>
+    <color name="jpfm_accent">#FF4FE3B0</color>
+</resources>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">JPFM</string>
+    <string name="downloads_channel">Nedladdningar</string>
+    <string name="downloads_channel_description">Visar hur nedladdningen av musik för offline går.</string>
+    <string name="playback_channel">Uppspelning</string>
+</resources>
