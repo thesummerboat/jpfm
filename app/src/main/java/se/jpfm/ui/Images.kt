@@ -11,6 +11,7 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +46,19 @@ import se.jpfm.plex.PlexServer
 import se.jpfm.plex.UltraBlur
 
 val LocalGraph = staticCompositionLocalOf<AppGraph> { error("Ingen AppGraph") }
+
+/**
+ * Omslaget att visa för en låt: originalsingelns eller albumets för låtar på samlingsskivor
+ * (när vi hittat det), annars albumets. Ber om att det letas fram om det behövs.
+ */
+@Composable
+fun trackThumb(t: se.jpfm.plex.Track): String? {
+    val g = LocalGraph.current
+    if (!LocalSettings.current.compilationCovers || !se.jpfm.covers.CoverMatch.isCompilation(t)) return t.thumb
+    val found by g.covers.found.collectAsState()
+    LaunchedEffect(t.ratingKey) { g.covers.want(t) }
+    return found[t.ratingKey] ?: t.thumb
+}
 val LocalServer = staticCompositionLocalOf<PlexServer?> { null }
 val LocalSettings = compositionLocalOf { Settings() }
 

@@ -386,7 +386,7 @@ fun MusicItemCard(item: MusicItem, index: Int, onOpen: (MusicItem) -> Unit, onLo
         is Artist -> ArtistCard(item, { onOpen(item) }, { onLongClick(item) })
         is Playlist -> PlaylistCard(item, { onOpen(item) }, { onLongClick(item) })
         is Station -> StationCard(item, index, { onOpen(item) })
-        is Track -> MediaCard(item.thumb, item.title, item.displayArtist, 140.dp, Icons.Rounded.Album, { onOpen(item) }, { onLongClick(item) })
+        is Track -> MediaCard(trackThumb(item), item.title, item.displayArtist, 140.dp, Icons.Rounded.Album, { onOpen(item) }, { onLongClick(item) })
     }
 }
 
@@ -416,7 +416,7 @@ fun TrackRow(
     ) {
         when {
             showArt -> Box(Modifier.size(48.dp)) {
-                Artwork(track.thumb, Modifier.fillMaxSize(), size = 144, shape = RoundedCornerShape(6.dp))
+                Artwork(trackThumb(track), Modifier.fillMaxSize(), size = 144, shape = RoundedCornerShape(6.dp))
                 if (isCurrent) {
                     Box(Modifier.fillMaxSize().clip(RoundedCornerShape(6.dp)).background(Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
                         EqualizerBars(isPlaying, accent, Modifier.size(18.dp))

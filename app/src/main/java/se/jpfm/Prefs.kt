@@ -26,6 +26,8 @@ data class Settings(
     val leveling: Leveling = Leveling.AUTO,
     val downloadWifiOnly: Boolean = true,
     val dynamicColors: Boolean = true,
+    /** Originalomslag för låtar på samlingsskivor. */
+    val compilationCovers: Boolean = true,
 )
 
 /** Små inställningar som ska överleva omstart. */
@@ -120,6 +122,7 @@ class Prefs(context: Context) {
         leveling = enumOr(sp.getString("leveling", null), Leveling.AUTO),
         downloadWifiOnly = sp.getBoolean("download_wifi_only", true),
         dynamicColors = sp.getBoolean("dynamic_colors", true),
+        compilationCovers = sp.getBoolean("compilation_covers", true),
     )
 
     fun updateSettings(transform: (Settings) -> Settings) {
@@ -130,6 +133,7 @@ class Prefs(context: Context) {
             .putString("leveling", s.leveling.name)
             .putBoolean("download_wifi_only", s.downloadWifiOnly)
             .putBoolean("dynamic_colors", s.dynamicColors)
+            .putBoolean("compilation_covers", s.compilationCovers)
             .apply()
         _settings.value = s
     }

@@ -63,7 +63,7 @@ object TrackItems {
         .setSubtitle(t.displayArtist)
         .setAlbumTitle(t.album)
         .setAlbumArtist(t.artist)
-        .setArtworkUri(t.thumb?.let { ArtworkProvider.uri(it) })
+        .setArtworkUri(t.thumb?.let { ArtworkProvider.uri(it, track = if (se.jpfm.covers.CoverMatch.isCompilation(t)) t.ratingKey else null) })
         .setTrackNumber(t.index)
         .setDiscNumber(t.disc)
         .setReleaseYear(t.year)

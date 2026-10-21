@@ -137,7 +137,9 @@ fun NowPlaying(vm: AppViewModel, onClose: () -> Unit) {
     val details = rememberLoadable(track.ratingKey) {
         if (g.session.isReady) g.library.trackDetails(track.ratingKey) else null
     }
-    val colors = rememberArtColors(track.thumb, details.data?.ultraBlur, settings.dynamicColors)
+    // Riktigt omslag för låtar på samlingar; då passar inte samlingens färger från Plex.
+    val thumb = se.jpfm.ui.trackThumb(track)
+    val colors = rememberArtColors(thumb, details.data?.ultraBlur?.takeIf { thumb == track.thumb }, settings.dynamicColors)
     val top by animateColorAsState(colors.base, tween(700), label = "top")
     val mid by animateColorAsState(colors.deep, tween(700), label = "mid")
     val accent by animateColorAsState(colors.accent, tween(700), label = "accent")
@@ -436,7 +438,7 @@ private fun CoverPanel(track: Track, playing: Boolean, onSwipe: (Int) -> Unit, d
     val threshold = with(LocalDensity.current) { 80.dp.toPx() }
     Box(Modifier.fillMaxSize().then(dragToClose()), contentAlignment = Alignment.Center) {
         Artwork(
-            track.thumb,
+            se.jpfm.ui.trackThumb(track),
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
@@ -673,7 +675,7 @@ private fun QueueRow(e: QueueEntry, current: Boolean, playing: Boolean, accent: 
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(44.dp)) {
-            Artwork(e.track.thumb, Modifier.fillMaxSize(), size = 144, shape = RoundedCornerShape(6.dp))
+            Artwork(se.jpfm.ui.trackThumb(e.track), Modifier.fillMaxSize(), size = 144, shape = RoundedCornerShape(6.dp))
             if (current) {
                 Box(Modifier.fillMaxSize().clip(RoundedCornerShape(6.dp)).background(Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
                     EqualizerBars(playing, accent, Modifier.size(16.dp))

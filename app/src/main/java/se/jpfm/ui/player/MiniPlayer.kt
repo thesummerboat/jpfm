@@ -52,7 +52,7 @@ import kotlin.math.abs
 @Composable
 fun MiniPlayer(p: PlayerConnection, onOpen: () -> Unit, modifier: Modifier = Modifier) {
     if (!p.hasMedia) return
-    val thumb = p.nowThumb
+    val thumb = p.current?.let { se.jpfm.ui.trackThumb(it) } ?: p.nowThumb
     val title = p.nowTitle ?: p.current?.title ?: ""
     val subtitle = (if (p.isLive) "LIVE · " else "") + (p.nowSubtitle ?: p.current?.displayArtist ?: "")
     val dynamic = LocalSettings.current.dynamicColors

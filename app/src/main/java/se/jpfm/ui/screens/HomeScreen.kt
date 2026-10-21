@@ -694,7 +694,7 @@ private fun CompactTrack(vm: AppViewModel, t: Track) {
             .padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Artwork(t.thumb, Modifier.size(52.dp), size = 156, shape = RoundedCornerShape(6.dp))
+        Artwork(se.jpfm.ui.trackThumb(t), Modifier.size(52.dp), size = 156, shape = RoundedCornerShape(6.dp))
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(t.title, style = MaterialTheme.typography.bodyLarge, color = if (current) Jp.Accent else Jp.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)

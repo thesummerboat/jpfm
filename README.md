@@ -22,7 +22,8 @@ Syskonapp till [JPTV](https://github.com/thesummerboat/jptv).
 | Ljud | Direktuppspelning av originalfilen utan glapp mellan låtar. Ljudutjämning med Plex ljudanalys (automatiskt per album eller per låt). Klarar telefonen inte filen kodar Plex om den automatiskt. Valfri lägre kvalitet på mobildata. |
 | Offline | Ladda ner album och spellistor i originalkvalitet (bara på wifi om du vill). Omslag och ljudnivåer sparas också, så allt fungerar utan nät – även i bilen. |
 | Android Auto | Hem (Dina mixar, topplistorna, stationer och Plex mixar direkt), Spellistor, Artister (A–Ö) och Nedladdat, sök i bilen och röststyrning: "Spela Kent på JPFM". Gilla och låtradio som knappar i bilen. |
-| Önska musik | Saknas något? Sök i Lidarr och tryck **Önska** – från sök, från topplistan (låtar du inte har) eller under Inställningar. Lidarr på servern laddar ner skivan, Plex läser in den och den dyker upp i JPFM. Önskningar när servern inte går att nå sparas och skickas senare. |
+| Riktiga omslag | Låtar på samlingsskivor ("Top 100 Hits", "Various Artists" …) får originalsingelns eller albumets omslag – i listor, spelaren, notisen och bilen. Letas upp i MusicBrainz/Cover Art Archive och hos Apple som reserv. Går att stänga av i inställningarna. |
+| Önska musik | Saknas något? Sök och tryck **Önska** – från sök, från topplistan (låtar du inte har) eller under Inställningar. Önskningen går till JPFM-servern hemma; andras önskningar godkänner eller nekar du först. Lidarr laddar ner skivan, Plex läser in den och den dyker upp i JPFM. |
 | Fortsätt där du var | Kön sparas, så musiken kan fortsätta efter omstart, från hörlurarna eller när bilen startar. |
 | Plex vet vad som spelas | Spelas nu, senast spelat och antal spelningar uppdateras i Plex, och gillade låtar sparas där. |
 
@@ -46,25 +47,39 @@ Appar som inte kommer från Play Butik måste godkännas en gång i Android Auto
 
 Polestar 2 har trådbunden Android Auto från programvaruversion P3.3.16.
 
-## Önska musik: Lidarr på Unraid
+## Önska musik: JPFM-servern och Lidarr på Unraid
 
-JPFM skickar önskningar till [Lidarr](https://lidarr.audio), som sköter nedladdningen på servern. Vad Lidarr laddar ner ifrån bestämmer du i Lidarr (nedladdningsklient och källor); JPFM är bara beställningsdelen.
+Önskningar går via **JPFM-servern**, en liten container på Unraid. Den kollar med plex.tv vem som önskar: du som äger Plex-servern blir admin, de du delar biblioteket med kan önska (du godkänner eller nekar), alla andra nekas. Godkända önskningar skickas till [Lidarr](https://lidarr.audio), som laddar ner skivan dit Plex läser. Vad Lidarr laddar ner ifrån bestämmer du i Lidarr; JPFM är bara beställningsdelen.
 
-1. **Installera Lidarr:** Unraid → **Apps** → sök "Lidarr" (t.ex. linuxserver/lidarr) → installera. Peka mappen `/music` i containern mot **samma musikmapp som Plex läser** (t.ex. `/mnt/user/media/music`), och `/downloads` mot nedladdningsmappen.
-2. **Lidarr → Settings → Media Management → Root Folders:** lägg till `/music`.
-3. **Lidarr → Settings → Profiles → Metadata Profiles:** bocka i *Album*, *EP* och *Single* så att det går att önska singlar.
-4. **Lidarr → Settings → Download Clients:** lägg till din nedladdningsklient.
-5. **Lidarr → Settings → Connect → Plex Media Server:** då läser Plex in ny musik direkt när den är klar (JPFM ber också Plex läsa in när en önskan är klar).
-6. **Lidarr → Settings → General:** kopiera **API Key**.
-7. **JPFM → Inställningar → Önska musik → Lidarr:** fyll i adressen (`http://<serverns-ip>:8686`) och API-nyckeln, tryck **Testa anslutningen**, välj mapp och profiler och **Spara**.
+### 1. Lidarr
 
-### Önska när du inte är hemma (Tailscale)
+1. Unraid → **Apps** → sök "Lidarr" (t.ex. linuxserver/lidarr) → installera. Peka `/music` i containern mot **samma musikmapp som Plex läser** (t.ex. `/mnt/user/media/music`) och `/downloads` mot nedladdningsmappen.
+2. **Settings → Media Management → Root Folders:** lägg till `/music`.
+3. **Settings → Profiles → Metadata Profiles:** bocka i *Album*, *EP* och *Single*, så går det att önska singlar.
+4. **Settings → Download Clients:** lägg till din nedladdningsklient.
+5. **Settings → Connect → Plex Media Server:** då läser Plex in ny musik direkt.
+6. **Settings → General:** kopiera **API Key**.
 
-1. Unraid 7: **Settings → Tailscale** (eller pluginet *Tailscale* i Apps) → logga in. Servern får ett namn, t.ex. `tower`, och en adress `100.x.y.z`.
-2. Installera Tailscale på telefonen och logga in med samma konto.
-3. I JPFM: använd Tailscale-adressen, t.ex. `http://tower:8686` eller `http://100.x.y.z:8686`. Den fungerar både hemma och borta.
+### 2. JPFM-servern
 
-Utan Tailscale fungerar det ändå: önskningar sparas och skickas när telefonen når servern.
+1. Unraid → **Docker → Add Container**:
+   - **Repository:** `ghcr.io/thesummerboat/jpfm-server:latest`
+   - **Port:** `8687` → `8687`
+   - **Path:** `/data` → `/mnt/user/appdata/jpfm-server`
+
+   (Eller lägg [`server/unraid/jpfm-server.xml`](server/unraid/jpfm-server.xml) i `/boot/config/plugins/dockerMan/templates-user/` och välj mallen *jpfm-server*.)
+2. **JPFM → Inställningar → Önska musik → JPFM-servern och Lidarr:** fyll i `http://<unraid>:8687` och tryck **Anslut**. Första gången kopplas servern till ditt Plex-konto (du måste äga Plex-servern).
+3. Under **Lidarr** i samma vy: Lidarrs adress *sett från servern* (t.ex. `http://192.168.1.10:8686`), API-nyckeln → **Testa anslutningen** → välj mapp och profiler → **Spara**. Nyckeln sparas bara på servern.
+
+### Dela med andra
+
+De du delar Plex-biblioteket med installerar JPFM, loggar in med sitt Plex-konto och ansluter till samma serveradress. Deras önskningar hamnar under **Att godkänna** hos dig (och på hemskärmen) med **Godkänn** och **Neka** (med skäl om du vill). Under *De du delar med* kan du välja **Godkänn alltid** eller **Blockera** per person.
+
+### Utanför hemmet (Tailscale)
+
+1. Unraid 7: **Settings → Tailscale** (eller pluginet *Tailscale* i Apps) → logga in. Servern får ett namn, t.ex. `tower`.
+2. Installera Tailscale på telefonen med samma konto.
+3. Använd `http://tower:8687` i JPFM – det fungerar både hemma och borta. Utan Tailscale sparas önskningar och skickas när telefonen når servern.
 
 ## Signering
 
@@ -79,7 +94,9 @@ Alla versioner signeras med samma nyckel, annars vägrar Android installera uppd
 Kotlin · Jetpack Compose (Material 3) · Media3 (ExoPlayer, MediaLibraryService, nedladdning) · OkHttp · Coil · Palette. Plex-API enligt [developer.plex.tv](https://developer.plex.tv).
 
 - `plex/` – inloggning, serverval med omförsök, musik-API och tolkning av svaren
-- `request/` – önska musik via Lidarr: sök, önska, följ nedladdningen
+- `request/` – önska musik via JPFM-servern: sök, önska, godkänn/neka, följ nedladdningen
+- `server/` – JPFM-servern (Python/FastAPI, SQLite): Plex-inloggning, godkännanden, Lidarr
+- `covers/` – riktiga omslag för låtar på samlingsskivor
 - `charts/` – topplistan för Sverige (Apple Musics publika lista, utan konto)
 - `playback/` – spelartjänsten, köer och radio, Android Auto-trädet, ljudutjämning, omslag till bilen
 - `download/` – nedladdning för offline

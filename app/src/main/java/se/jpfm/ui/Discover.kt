@@ -202,7 +202,7 @@ fun RankedTrack(
     extra: String? = null,
 ) = RankRow(
     rank = rank,
-    thumb = track.thumb,
+    thumb = trackThumb(track),
     title = track.title,
     subtitle = listOfNotNull(track.displayArtist, extra).joinToString(" · "),
     isCurrent = isCurrent,
@@ -228,7 +228,7 @@ fun ChartEntry(
     val t = hit.track
     RankRow(
         rank = hit.rank,
-        thumb = t?.thumb ?: hit.song.artwork?.replace("100x100bb", "300x300bb"),
+        thumb = t?.let { trackThumb(it) } ?: hit.song.artwork?.replace("100x100bb", "300x300bb"),
         title = t?.title ?: hit.song.title,
         subtitle = when {
             t != null -> t.displayArtist

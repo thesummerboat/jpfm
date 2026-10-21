@@ -31,6 +31,13 @@ class ArtworkProvider : ContentProvider() {
         val path = uri.getQueryParameter("p")?.takeIf { ALLOWED.matches(it) } ?: throw FileNotFoundException(uri.toString())
         val size = uri.getQueryParameter("s")?.toIntOrNull()?.coerceIn(64, 1200) ?: DEFAULT_SIZE
         val ctx = context ?: throw FileNotFoundException("Ingen context")
+        // Låt på en samling med ett riktigt omslag: visa det i stället för samlingens.
+        uri.getQueryParameter("t")?.let { track ->
+            val app = ctx.applicationContext as JpfmApp
+            if (app.graph.prefs.settings.value.compilationCovers) {
+                app.graph.covers.peek(track)?.let { url -> fetch(app, url)?.let { return ParcelFileDescriptor.open(it, ParcelFileDescriptor.MODE_READ_ONLY) } }
+            }
+        }
         val file = ensure(ctx.applicationContext as JpfmApp, path, size)
             ?: throw FileNotFoundException("Omslaget går inte att hämta just nu")
         return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
@@ -58,9 +65,14 @@ class ArtworkProvider : ContentProvider() {
         }
 
         private fun ensureRemote(app: JpfmApp, key: String): File? {
-            val f = File(File(app.cacheDir, "art").apply { mkdirs() }, "r_$key.img")
+            val url = remote[key] ?: return File(File(app.cacheDir, "art"), "r_$key.img").takeIf { it.exists() && it.length() > 0 }
+            return fetch(app, url)
+        }
+
+        /** Hämtar en bild från en vanlig adress (radiologga, poddomslag, riktigt omslag). */
+        private fun fetch(app: JpfmApp, url: String): File? {
+            val f = File(File(app.cacheDir, "art").apply { mkdirs() }, "r_${hash(url)}.img")
             if (f.exists() && f.length() > 0) return f
-            val url = remote[key] ?: return null
             return try {
                 app.graph.http.newCall(Request.Builder().url(url).header("User-Agent", "JPFM/1.0").build()).execute().use { resp ->
                     val body = resp.body
@@ -75,10 +87,11 @@ class ArtworkProvider : ContentProvider() {
             }
         }
 
-        fun uri(thumb: String, size: Int = DEFAULT_SIZE): Uri = Uri.Builder()
+        fun uri(thumb: String, size: Int = DEFAULT_SIZE, track: String? = null): Uri = Uri.Builder()
             .scheme("content").authority(AUTHORITY).appendPath("art")
             .appendQueryParameter("p", thumb)
             .appendQueryParameter("s", size.toString())
+            .apply { if (track != null) appendQueryParameter("t", track) }
             .build()
 
         private fun hash(s: String): String =

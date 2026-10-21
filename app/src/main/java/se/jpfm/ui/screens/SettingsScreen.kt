@@ -123,6 +123,11 @@ fun SettingsScreen(vm: AppViewModel) {
             }
             Hint("Använder Plex ljudanalys så att alla låtar låter lika högt. Automatisk utjämnar per album när du lyssnar på ett helt album och per låt annars.")
             Toggle("Färger från omslaget", s.dynamicColors) { on -> g.prefs.updateSettings { it.copy(dynamicColors = on) } }
+            Toggle("Riktiga omslag på samlingsskivor", s.compilationCovers) { on ->
+                g.prefs.updateSettings { it.copy(compilationCovers = on) }
+                g.covers.enabled = on
+            }
+            Hint("Låtar på samlingar som \"Top 100 Hits\" får originalsingelns eller albumets omslag. Letas upp i MusicBrainz (öppet, utan spårning) och hos Apple som reserv.")
 
             Group("Nedladdningar")
             Toggle("Ladda bara ner på wifi", s.downloadWifiOnly) { on ->

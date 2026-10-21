@@ -40,6 +40,8 @@ class QueueBuilder(private val g: AppGraph) {
 
     fun mediaItems(q: BuiltQueue): List<MediaItem> {
         q.media?.let { return it }
+        // Riktiga omslag för låtar på samlingar: börja leta med det som spelas först.
+        g.covers.want(q.tracks.drop(q.startIndex).take(40) + q.tracks.take(q.startIndex), first = true)
         val quality = g.currentQuality()
         val ctxId = when (q.context.kind) {
             QueueContext.Kind.ALBUM -> q.context.id?.let { "album:$it" }
