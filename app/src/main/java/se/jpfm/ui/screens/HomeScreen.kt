@@ -237,7 +237,7 @@ private fun RadioRow(vm: AppViewModel, hubs: List<Hub>) {
             RadioCard("Hela biblioteket", "BLANDAD RADIO", null, 0, onClick = { vm.shuffleLibrary() }, icon = Icons.Rounded.Shuffle)
         }
         itemsIndexed(stations, key = { _, st -> "st:${st.key}" }) { i, st ->
-            StationCard(st, i + 1) { vm.playStation(st) }
+            StationCard(st, i + 1, onClick = { vm.playStation(st) })
         }
         itemsIndexed(artists, key = { _, a -> "ar:${a.first}" }) { i, (key, name, thumb) ->
             RadioCard(name, "ARTISTRADIO", thumb, i + stations.size + 1, onClick = { vm.artistRadio(Artist(key, name, thumb)) })
