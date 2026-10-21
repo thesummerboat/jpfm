@@ -193,7 +193,7 @@ private fun Recents(recents: List<String>, onPick: (String) -> Unit, onClear: ()
 
 @Composable
 private fun Results(vm: AppViewModel, r: SearchResult, query: String, onOpen: () -> Unit) {
-    val canRequest = LocalGraph.current.requests.config.collectAsState().value != null
+    val canRequest = LocalGraph.current.requests.url.collectAsState().value != null
     if (r.isEmpty) {
         EmptyBox(
             Icons.Rounded.SearchOff,

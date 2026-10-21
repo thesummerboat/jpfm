@@ -153,11 +153,15 @@ fun HomeScreen(vm: AppViewModel) {
     val subs by g.podcasts.subscriptions.collectAsState()
     val progress by g.podcasts.progress.collectAsState()
     val requests by g.requests.requests.collectAsState()
-    // Önskningar på väg: fråga Lidarr hur det går när hemskärmen visas.
-    LaunchedEffect(requests.any { it.active }) {
-        while (requests.any { it.active }) {
-            g.requests.sync()
+    val requestMe by g.requests.me.collectAsState()
+    val requestServer by g.requests.url.collectAsState()
+    // Önskningar: fråga servern hur det går (och om något väntar på godkännande) när hemskärmen visas.
+    LaunchedEffect(requestServer, requests.any { it.state.active }) {
+        if (requestServer == null) return@LaunchedEffect
+        g.requests.sync()
+        while (requests.any { it.state.active }) {
             kotlinx.coroutines.delay(30_000)
+            g.requests.sync()
         }
     }
     val episodes = rememberLoadable("eps", subs.map { it.id }, epoch, keep = "home:eps") { g.podcasts.latest() }
@@ -207,11 +211,17 @@ fun HomeScreen(vm: AppViewModel) {
                 }
             }
             if (music) {
-                val active = requests.filter { it.active || (it.state == se.jpfm.request.RequestState.DONE && System.currentTimeMillis() - it.updatedAt < 6 * 3_600_000L) }
-                if (active.isNotEmpty()) {
+                val pending = requestMe?.pending ?: 0
+                val active = requests.filter { it.mine && it.state.active }
+                if (pending > 0 || active.isNotEmpty()) {
                     item(key = "requests") {
-                        SectionHeader("Dina önskningar", subtitle = "Lidarr hämtar till servern", action = "Alla") { vm.nav.push(Screen.Request()) }
-                        active.take(3).forEach { r -> RequestRow(r, onRemove = null, onClick = { vm.nav.push(Screen.Request()) }) }
+                        SectionHeader(
+                            if (pending > 0) "Önskningar att godkänna" else "Dina önskningar",
+                            subtitle = if (pending > 0) "$pending väntar på ditt svar" else "På väg till biblioteket",
+                            action = "Visa",
+                        ) { vm.nav.push(Screen.Request()) }
+                        val show = if (pending > 0) requests.filter { it.state == se.jpfm.request.RequestState.PENDING && !it.mine } else active
+                        show.take(3).forEach { r -> RequestRow(r, onRemove = null, onClick = { vm.nav.push(Screen.Request()) }, showWho = !r.mine) }
                     }
                 }
             }
@@ -475,9 +485,14 @@ fun ChartHitRow(vm: AppViewModel, chart: List<ChartHit>, hit: ChartHit, modifier
     val t = hit.track
     val a = hit.artist
     val g = LocalGraph.current
-    val canRequest = g.requests.config.collectAsState().value != null
+    val me by g.requests.me.collectAsState()
+    val canRequest = g.requests.url.collectAsState().value != null && me?.canRequest != false
     val requests by g.requests.requests.collectAsState()
-    val requested = t == null && requests.any { r -> r.song.equals(hit.song.title, ignoreCase = true) && r.artist.equals(hit.song.artist, ignoreCase = true) }
+    val requested = t == null && requests.any { r ->
+        r.state != se.jpfm.request.RequestState.DENIED &&
+            r.song.equals(hit.song.title, ignoreCase = true) &&
+            (r.artist.isBlank() || r.artist.equals(hit.song.artist, ignoreCase = true) || hit.song.artist.contains(r.artist, ignoreCase = true))
+    }
     ChartEntry(
         hit,
         isCurrent = t != null && vm.player.current?.ratingKey == t.ratingKey,

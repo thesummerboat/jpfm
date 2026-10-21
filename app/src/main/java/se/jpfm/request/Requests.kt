@@ -8,7 +8,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -16,236 +15,245 @@ import org.json.JSONArray
 import org.json.JSONObject
 import se.jpfm.plex.Library
 import java.io.File
-import java.io.IOException
 
-enum class RequestState(val label: String) {
-    WAITING("Väntar på att skickas"),
-    SEARCHING("Lidarr letar"),
-    DOWNLOADING("Laddas ner"),
-    IMPORTING("Läggs in"),
-    DONE("Klar"),
-    FAILED("Gick inte"),
-}
+/** En önskan som inte gått att skicka än (servern gick inte att nå). */
+data class QueuedRequest(val term: String, val artist: String, val song: String?, val createdAt: Long = System.currentTimeMillis()) {
+    fun toJson(): JSONObject = JSONObject().put("term", term).put("artist", artist).put("created", createdAt).apply { song?.let { put("song", it) } }
 
-/** Något du önskat: ett album eller en singel, och hur det går med det. */
-data class SongRequest(
-    /** Albumets MusicBrainz-id, eller "q:" + sökningen för önskningar som inte skickats än. */
-    val id: String,
-    val title: String,
-    val artist: String,
-    val type: String? = null,
-    val year: Int? = null,
-    val cover: String? = null,
-    /** Låten du ville ha, om du önskade från en låt. */
-    val song: String? = null,
-    /** Ännu inte hittad i Lidarr: söks fram när Lidarr går att nå. */
-    val term: String? = null,
-    /** Lidarrs beskrivning av albumet, för att kunna skicka önskningen senare. */
-    val album: JSONObject? = null,
-    val lidarrId: Int = 0,
-    val state: RequestState,
-    val progress: Float = 0f,
-    val message: String? = null,
-    val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis(),
-) {
-    val active: Boolean get() = state == RequestState.WAITING || state == RequestState.SEARCHING ||
-        state == RequestState.DOWNLOADING || state == RequestState.IMPORTING
-
-    fun toJson(): JSONObject = JSONObject().apply {
-        put("id", id); put("title", title); put("artist", artist)
-        type?.let { put("type", it) }
-        year?.let { put("year", it) }
-        cover?.let { put("cover", it) }
-        song?.let { put("song", it) }
-        term?.let { put("term", it) }
-        album?.let { put("album", it) }
-        put("lidarrId", lidarrId); put("state", state.name); put("progress", progress.toDouble())
-        message?.let { put("message", it) }
-        put("created", createdAt); put("updated", updatedAt)
-    }
+    fun asRemote(): RemoteRequest = RemoteRequest(
+        id = -createdAt,
+        foreignAlbumId = "",
+        title = song ?: term,
+        artist = artist,
+        type = null,
+        year = null,
+        cover = null,
+        song = song,
+        userName = "",
+        state = RequestState.QUEUED,
+        progress = 0f,
+        message = null,
+        reason = null,
+        createdAt = createdAt,
+        mine = true,
+    )
 
     companion object {
-        fun fromJson(o: JSONObject): SongRequest? {
-            val id = o.optString("id").ifBlank { return null }
-            fun s(k: String) = if (o.has(k) && !o.isNull(k)) o.optString(k).ifBlank { null } else null
-            return SongRequest(
-                id = id,
-                title = s("title").orEmpty(),
-                artist = s("artist").orEmpty(),
-                type = s("type"),
-                year = if (o.has("year")) o.optInt("year") else null,
-                cover = s("cover"),
-                song = s("song"),
-                term = s("term"),
-                album = o.optJSONObject("album"),
-                lidarrId = o.optInt("lidarrId"),
-                state = RequestState.entries.firstOrNull { it.name == o.optString("state") } ?: RequestState.WAITING,
-                progress = o.optDouble("progress", 0.0).toFloat(),
-                message = s("message"),
-                createdAt = o.optLong("created"),
-                updatedAt = o.optLong("updated"),
-            )
+        fun fromJson(o: JSONObject): QueuedRequest? {
+            val term = o.optString("term").ifBlank { return null }
+            return QueuedRequest(term, o.optString("artist"), if (o.has("song")) o.optString("song") else null, o.optLong("created"))
         }
     }
 }
 
 /**
- * Önskningar till Lidarr på servern hemma. Önskar du när Lidarr inte går att nå (i bilen
- * utan Tailscale) sparas önskningen och skickas nästa gång den går att nå. När Lidarr laddat
- * ner och lagt in musiken ber vi Plex läsa in biblioteket.
+ * Önskningar via JPFM-servern på Unraid. Servern håller i önskningarna och godkännandena och
+ * pratar med Lidarr; appen loggar in med din Plex-token. Önskar du när servern inte går att nå
+ * sparas önskningen här och skickas nästa gång.
  */
-class RequestRepository(private val http: OkHttpClient, dir: File) {
-    private val lidarr = LidarrClient(http)
-    private val configFile = File(dir, "lidarr.json")
-    private val file = File(dir, "requests.json")
+class RequestRepository(
+    private val http: OkHttpClient,
+    dir: File,
+    private val token: () -> String?,
+    private val plexServerId: () -> String?,
+) {
+    private val api = JpfmServerClient(http)
+    private val configFile = File(dir, "request-server.json")
+    private val cacheFile = File(dir, "requests-cache.json")
+    private val queueFile = File(dir, "requests-queued.json")
     private val lock = Any()
     private val syncing = Mutex()
 
-    private val _config = MutableStateFlow(readConfig())
-    val config: StateFlow<LidarrConfig?> = _config.asStateFlow()
+    private val _url = MutableStateFlow(readUrl())
+    /** JPFM-serverns adress, eller null om den inte är kopplad. */
+    val url: StateFlow<String?> = _url.asStateFlow()
 
-    private val _requests = MutableStateFlow(readRequests())
-    val requests: StateFlow<List<SongRequest>> = _requests.asStateFlow()
+    private val _me = MutableStateFlow<ServerMe?>(null)
+    val me: StateFlow<ServerMe?> = _me.asStateFlow()
 
-    private val _finished = MutableSharedFlow<SongRequest>(extraBufferCapacity = 8)
-    /** Önskningar som just blivit klara (för ett meddelande och omläsning i Plex). */
-    val finished: SharedFlow<SongRequest> = _finished.asSharedFlow()
+    private val _remote = MutableStateFlow(readCache())
+    private val _queued = MutableStateFlow(readQueue())
+    private val _requests = MutableStateFlow(merge())
+    /** Önskningar: de som väntar på att skickas först, sedan serverns (ägaren ser allas). */
+    val requests: StateFlow<List<RemoteRequest>> = _requests.asStateFlow()
 
-    val configured: Boolean get() = _config.value != null
+    private val _finished = MutableSharedFlow<RemoteRequest>(extraBufferCapacity = 8)
+    /** Dina önskningar som just blivit klara. */
+    val finished: SharedFlow<RemoteRequest> = _finished.asSharedFlow()
 
-    // ---------- Inställningar ----------
+    val configured: Boolean get() = _url.value != null
 
-    suspend fun testConnection(url: String, key: String): LidarrSetup = lidarr.setup(LidarrConfig.normalizeUrl(url), key.trim())
+    private fun auth(): Pair<String, String> {
+        val u = _url.value ?: throw ServerException("JPFM-servern är inte kopplad", 0)
+        val t = token() ?: throw ServerException("Logga in med Plex först", 401)
+        return u to t
+    }
 
-    fun saveConfig(cfg: LidarrConfig?) {
-        _config.value = cfg
-        runCatching {
-            if (cfg == null) configFile.delete() else configFile.writeText(cfg.toJson().toString())
+    // ---------- Koppla ----------
+
+    /**
+     * Ansluter till JPFM-servern. Är servern ny och du äger Plex-servern kopplas den till dig.
+     */
+    suspend fun connect(rawUrl: String): ServerMe {
+        val u = JpfmServerClient.normalizeUrl(rawUrl)
+        val t = token() ?: throw ServerException("Logga in med Plex först", 401)
+        if (!api.health(u)) throw ServerException("Det där verkar inte vara en JPFM-server", 0)
+        var me = api.me(u, t)
+        if (me.role == "unclaimed") {
+            val sid = plexServerId() ?: throw ServerException("Anslut till din Plex-server först", 0)
+            api.claim(u, t, sid)
+            me = api.me(u, t)
         }
+        if (me.role == "denied") throw ServerException("Du har inte tillgång till Plex-servern som JPFM-servern hör till", 403)
+        saveUrl(u)
+        _me.value = me
+        runCatching { refreshRequests() }
+        return me
+    }
+
+    fun disconnect() {
+        saveUrl(null)
+        _me.value = null
+        _remote.value = emptyList()
+        publish()
+        runCatching { cacheFile.delete() }
+    }
+
+    // ---------- Lidarr (ägaren) ----------
+
+    suspend fun lidarrSettings(): LidarrSettings = auth().let { (u, t) -> api.lidarr(u, t) }
+
+    suspend fun testLidarr(lidarrUrl: String, apiKey: String?): LidarrSetup = auth().let { (u, t) -> api.testLidarr(u, t, lidarrUrl, apiKey) }
+
+    suspend fun saveLidarr(lidarrUrl: String, apiKey: String?, root: String, quality: Int, metadata: Int) {
+        val (u, t) = auth()
+        api.saveLidarr(u, t, lidarrUrl, apiKey, root, quality, metadata)
+        _me.value = api.me(u, t)
+    }
+
+    suspend fun users(): List<ServerUser> = auth().let { (u, t) -> api.users(u, t) }
+
+    suspend fun updateUser(id: Long, autoApprove: Boolean? = null, blocked: Boolean? = null) {
+        val (u, t) = auth()
+        api.updateUser(u, t, id, autoApprove, blocked)
     }
 
     // ---------- Söka och önska ----------
 
-    /** Söker i Lidarr. Ger "artist album" inget provar vi med bara [fallback] (titeln). */
-    suspend fun lookup(term: String, fallback: String? = null): List<LidarrAlbum> {
-        val cfg = _config.value ?: throw LidarrException("Lidarr är inte kopplat")
-        val first = lidarr.lookup(cfg, term)
-        if (first.isNotEmpty() || fallback.isNullOrBlank() || fallback.equals(term, ignoreCase = true)) return first
-        return lidarr.lookup(cfg, fallback)
+    suspend fun lookup(term: String, fallback: String? = null): List<ServerAlbum> = auth().let { (u, t) -> api.search(u, t, term, fallback) }
+
+    suspend fun request(album: ServerAlbum, song: String?): RemoteRequest {
+        val (u, t) = auth()
+        val r = api.request(u, t, album.foreignAlbumId, song)
+        upsertRemote(r)
+        return r
     }
 
-    fun requested(foreignAlbumId: String): SongRequest? = _requests.value.firstOrNull { it.id == foreignAlbumId }
-
-    /** Önskar ett album. Går Lidarr inte att nå just nu sparas önskningen och skickas senare. */
-    suspend fun request(album: LidarrAlbum, song: String? = null): SongRequest {
-        val cfg = _config.value ?: throw LidarrException("Lidarr är inte kopplat")
-        val base = SongRequest(
-            id = album.foreignAlbumId,
-            title = album.title,
-            artist = album.artist,
-            type = album.typeLabel,
-            year = album.year,
-            cover = album.cover,
-            song = song,
-            album = album.raw,
-            state = RequestState.SEARCHING,
-        )
-        if (album.complete) {
-            return upsert(base.copy(state = RequestState.DONE, lidarrId = album.lidarrId, message = "Finns redan i Lidarr"))
+    /** Sparar en önskan som skickas när servern går att nå. */
+    fun requestLater(term: String, artist: String, song: String?) {
+        synchronized(lock) {
+            _queued.value = listOf(QueuedRequest(term, artist, song)) + _queued.value.filter { !it.term.equals(term, ignoreCase = true) }
+            writeQueue()
         }
-        upsert(base)
-        return send(cfg, base)
+        publish()
     }
 
-    /** Önskar något vi inte kunnat söka fram ännu (Lidarr gick inte att nå). */
-    fun requestLater(term: String, artist: String, song: String?): SongRequest =
-        upsert(
-            SongRequest(
-                id = "q:" + term.lowercase().trim(),
-                title = song ?: term,
-                artist = artist,
-                song = song,
-                term = term,
-                state = RequestState.WAITING,
-                message = "Skickas när Lidarr går att nå",
-            ),
-        )
+    suspend fun approve(id: Long) {
+        val (u, t) = auth()
+        api.approve(u, t, id)
+        refreshRequests()
+    }
 
-    fun remove(id: String) = update { list -> list.filter { it.id != id } }
+    suspend fun deny(id: Long, reason: String?) {
+        val (u, t) = auth()
+        api.deny(u, t, id, reason)
+        refreshRequests()
+    }
 
-    fun clearFinished() = update { list -> list.filter { it.active || it.state == RequestState.FAILED } }
-
-    private suspend fun send(cfg: LidarrConfig, r: SongRequest): SongRequest {
-        val album = r.album?.let { LidarrParse.album(it) }
-            ?: return upsert(r.copy(state = RequestState.FAILED, message = "Saknar uppgifter om albumet"))
-        return try {
-            val id = lidarr.request(cfg, album)
-            upsert(r.copy(lidarrId = id, state = RequestState.SEARCHING, message = null, updatedAt = now()))
-        } catch (e: LidarrException) {
-            upsert(r.copy(state = RequestState.FAILED, message = e.message, updatedAt = now()))
-        } catch (e: IOException) {
-            upsert(r.copy(state = RequestState.WAITING, message = "Skickas när Lidarr går att nå", updatedAt = now()))
+    suspend fun remove(r: RemoteRequest) {
+        if (r.state == RequestState.QUEUED) {
+            synchronized(lock) {
+                _queued.value = _queued.value.filter { it.createdAt != r.createdAt }
+                writeQueue()
+            }
+            publish()
+            return
         }
+        val (u, t) = auth()
+        api.delete(u, t, r.id)
+        synchronized(lock) { _remote.value = _remote.value.filter { it.id != r.id } }
+        publish()
     }
 
-    // ---------- Hur det går ----------
+    // ---------- Hålla sig uppdaterad ----------
 
     /**
-     * Skickar det som väntar och frågar Lidarr hur det går med resten. Körs när appen startar,
-     * när nätet byts och medan önskningarna visas.
+     * Skickar det som väntar och hämtar läget från servern. Körs när appen startar, när nätet
+     * byts och medan önskningarna visas.
      */
     suspend fun sync() {
-        val cfg = _config.value ?: return
+        val u = _url.value ?: return
+        val t = token() ?: return
         if (!syncing.tryLock()) return
         try {
-            // 1. Det som väntar på att skickas.
-            for (r in _requests.value.filter { it.state == RequestState.WAITING }) {
-                val result = if (r.term != null) resolve(cfg, r) else send(cfg, r)
-                if (result.state == RequestState.WAITING) return // Lidarr går inte att nå: försök senare.
-            }
-            // 2. Status för det som är på väg.
-            val active = _requests.value.filter { it.lidarrId > 0 && it.active }
-            if (active.isEmpty()) return
-            val albums = lidarr.albumsById(cfg, active.map { it.lidarrId }).associateBy { it.lidarrId }
-            val queue = runCatching { lidarr.queue(cfg) }.getOrDefault(emptyList()).groupBy { it.albumId }
-            for (r in active) {
-                val a = albums[r.lidarrId]
-                val q = queue[r.lidarrId].orEmpty()
-                val next = RequestStatus.next(r, a, q, now())
-                if (next != r) {
-                    upsert(next)
-                    if (next.state == RequestState.DONE && r.state != RequestState.DONE) _finished.tryEmit(next)
-                }
-            }
-        } catch (_: IOException) {
+            val me = api.me(u, t)
+            _me.value = me
+            if (me.canRequest && me.lidarr) sendQueued(u, t)
+            refreshRequests()
+        } catch (_: java.io.IOException) {
             // Inte nåbar just nu.
         } finally {
             syncing.unlock()
         }
     }
 
-    /** Söker fram en önskan som sparades utan att Lidarr gick att nå, och skickar den. */
-    private suspend fun resolve(cfg: LidarrConfig, r: SongRequest): SongRequest {
-        val term = r.term ?: return r
-        val results = try {
-            lidarr.lookup(cfg, term)
-        } catch (e: LidarrException) {
-            return upsert(r.copy(state = RequestState.FAILED, message = e.message))
-        } catch (e: IOException) {
-            return r
+    private suspend fun sendQueued(u: String, t: String) {
+        for (q in _queued.value.reversed()) {
+            val results = api.search(u, t, q.term, q.song)
+            val best = RequestMatch.rank(results, q.artist.ifBlank { null }, null, q.song).firstOrNull()
+            if (best != null) api.request(u, t, best.foreignAlbumId, q.song)
+            synchronized(lock) {
+                _queued.value = _queued.value.filter { it.createdAt != q.createdAt }
+                writeQueue()
+            }
         }
-        val best = RequestMatch.rank(results, r.artist, null, r.song).firstOrNull()
-            ?: return upsert(r.copy(state = RequestState.FAILED, message = "Hittade inget i Lidarr", updatedAt = now()))
-        remove(r.id)
-        return request(best, r.song)
+        publish()
+    }
+
+    private suspend fun refreshRequests() {
+        val (u, t) = auth()
+        val fresh = api.requests(u, t)
+        val before = _remote.value.associateBy { it.id }
+        synchronized(lock) {
+            _remote.value = fresh
+            writeCache()
+        }
+        publish()
+        for (r in fresh) {
+            val old = before[r.id] ?: continue
+            if (r.mine && r.state == RequestState.DONE && old.state != RequestState.DONE) _finished.tryEmit(r)
+        }
+    }
+
+    private fun upsertRemote(r: RemoteRequest) {
+        synchronized(lock) {
+            _remote.value = listOf(r) + _remote.value.filter { it.id != r.id }
+            writeCache()
+        }
+        publish()
+    }
+
+    private fun merge(): List<RemoteRequest> = _queued.value.map { it.asRemote() } + _remote.value
+
+    private fun publish() {
+        _requests.value = merge()
     }
 
     // ---------- Topplistelåtar ----------
 
     /**
-     * Vilket album (eller vilken singel) en låt på Apples topplista ligger på. Används för att
-     * söka rätt i Lidarr, som bara hanterar hela album och singlar.
+     * Vilket album (eller vilken singel) en låt på Apples topplista ligger på, så att rätt skiva
+     * kan önskas (Lidarr hanterar hela album och singlar, inte lösa låtar).
      */
     suspend fun appleAlbumOf(songId: String): String? = withContext(Dispatchers.IO) {
         runCatching {
@@ -262,74 +270,58 @@ class RequestRepository(private val http: OkHttpClient, dir: File) {
 
     // ---------- Spara ----------
 
-    private fun upsert(r: SongRequest): SongRequest {
-        update { list -> listOf(r) + list.filter { it.id != r.id } }
-        return r
+    private fun saveUrl(u: String?) {
+        _url.value = u
+        runCatching { if (u == null) configFile.delete() else configFile.writeText(JSONObject().put("url", u).toString()) }
     }
 
-    private fun update(transform: (List<SongRequest>) -> List<SongRequest>) {
-        synchronized(lock) {
-            _requests.value = transform(_requests.value).take(60)
-            runCatching { file.writeText(JSONArray().apply { _requests.value.forEach { put(it.toJson()) } }.toString()) }
+    private fun readUrl(): String? = runCatching { JSONObject(configFile.readText()).optString("url").ifBlank { null } }.getOrNull()
+
+    private fun writeCache() {
+        runCatching {
+            val a = JSONArray()
+            _remote.value.take(100).forEach { r ->
+                a.put(
+                    JSONObject()
+                        .put("id", r.id).put("foreign_album_id", r.foreignAlbumId).put("title", r.title).put("artist", r.artist)
+                        .put("type", r.type ?: JSONObject.NULL).put("year", r.year ?: JSONObject.NULL).put("cover", r.cover ?: JSONObject.NULL)
+                        .put("song", r.song ?: JSONObject.NULL).put("user_name", r.userName).put("status", r.state.name.lowercase())
+                        .put("progress", r.progress.toDouble()).put("message", r.message ?: JSONObject.NULL).put("reason", r.reason ?: JSONObject.NULL)
+                        .put("created", r.createdAt / 1000.0).put("mine", r.mine),
+                )
+            }
+            cacheFile.writeText(a.toString())
         }
     }
 
-    private fun readRequests(): List<SongRequest> = runCatching {
-        val a = JSONArray(file.readText())
-        (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let { o -> SongRequest.fromJson(o) } }
+    private fun readCache(): List<RemoteRequest> = runCatching { ServerParse.requests(JSONArray(cacheFile.readText())) }.getOrDefault(emptyList())
+
+    private fun writeQueue() {
+        runCatching { queueFile.writeText(JSONArray().apply { _queued.value.forEach { put(it.toJson()) } }.toString()) }
+    }
+
+    private fun readQueue(): List<QueuedRequest> = runCatching {
+        val a = JSONArray(queueFile.readText())
+        (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let(QueuedRequest::fromJson) }
     }.getOrDefault(emptyList())
-
-    private fun readConfig(): LidarrConfig? = runCatching { LidarrConfig.fromJson(JSONObject(configFile.readText())) }.getOrNull()
-
-    private fun now() = System.currentTimeMillis()
-}
-
-/** Hur en önskan går, utifrån Lidarrs album och nedladdningskö. Ren logik, går att testa. */
-object RequestStatus {
-    private const val NOTHING_FOUND_AFTER = 30 * 60 * 1000L
-
-    fun next(r: SongRequest, album: LidarrAlbum?, queue: List<LidarrQueueItem>, now: Long): SongRequest {
-        if (album == null) return r.copy(state = RequestState.FAILED, message = "Borttaget i Lidarr", updatedAt = now)
-        if (album.complete) return r.copy(state = RequestState.DONE, progress = 1f, message = null, updatedAt = now)
-        val q = queue.maxByOrNull { it.progress }
-        if (q != null) {
-            val importing = q.state?.lowercase()?.let { it.startsWith("import") } == true
-            val failed = q.state?.lowercase()?.let { it.startsWith("failed") } == true
-            return r.copy(
-                state = when {
-                    failed -> RequestState.SEARCHING
-                    importing -> RequestState.IMPORTING
-                    else -> RequestState.DOWNLOADING
-                },
-                progress = q.progress,
-                message = if (failed) (q.error ?: "Nedladdningen misslyckades, Lidarr provar igen") else null,
-                updatedAt = if (q.progress != r.progress || r.state == RequestState.SEARCHING) now else r.updatedAt,
-            )
-        }
-        if (album.trackFiles > 0) {
-            return r.copy(state = RequestState.IMPORTING, progress = album.trackFiles.toFloat() / album.tracks.coerceAtLeast(1), message = null)
-        }
-        val waited = now - r.createdAt
-        return r.copy(
-            state = RequestState.SEARCHING,
-            progress = 0f,
-            message = if (waited > NOTHING_FOUND_AFTER) "Inget hittat än – Lidarr fortsätter leta" else null,
-        )
-    }
 }
 
 /** Väljer rätt album i Lidarrs sökresultat för en låt eller ett album du önskat. */
 object RequestMatch {
-    fun rank(results: List<LidarrAlbum>, artist: String?, album: String?, song: String?): List<LidarrAlbum> {
+    fun rank(results: List<ServerAlbum>, artist: String?, album: String?, song: String?): List<ServerAlbum> {
         val a = artist?.let { Library.norm(it) }.orEmpty()
         val al = album?.let { Library.norm(cleanAlbum(it)) }.orEmpty()
         val so = song?.let { Library.norm(it.substringBefore(" (")) }.orEmpty()
-        fun score(x: LidarrAlbum): Int {
+        fun score(x: ServerAlbum): Int {
             var s = 0
             val xa = Library.norm(x.artist)
             val xt = Library.norm(x.title)
             if (a.isNotEmpty()) {
-                if (xa == a) s += 10 else if (xa.contains(a) || a.contains(xa) && xa.isNotEmpty()) s += 5 else s -= 10
+                s += when {
+                    xa == a -> 10
+                    xa.isNotEmpty() && (xa.contains(a) || a.contains(xa)) -> 5
+                    else -> -10
+                }
             }
             if (al.isNotEmpty() && xt == al) s += 8
             if (so.isNotEmpty() && xt == so) s += 6
@@ -338,10 +330,10 @@ object RequestMatch {
             return s
         }
         return results.withIndex()
-            .sortedWith(compareByDescending<IndexedValue<LidarrAlbum>> { score(it.value) }.thenBy { it.index })
+            .sortedWith(compareByDescending<IndexedValue<ServerAlbum>> { score(it.value) }.thenBy { it.index })
             .map { it.value }
     }
 
-    /** "Housewife - Single" → "Housewife", "Album (Deluxe Edition)" behålls som det är. */
+    /** "Housewife - Single" → "Housewife". */
     fun cleanAlbum(name: String): String = name.removeSuffix(" - Single").removeSuffix(" - EP").trim()
 }

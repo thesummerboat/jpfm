@@ -57,7 +57,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             graph.requests.finished.collect { r ->
                 toast("Klart: ${r.title} finns snart i ditt bibliotek")
-                runCatching { graph.library.scan() }
+                if (graph.requests.me.value?.isOwner == true) runCatching { graph.library.scan() }
                 // Plex behöver en stund att läsa in filerna.
                 kotlinx.coroutines.delay(20_000)
                 graph.library.invalidate()
@@ -65,16 +65,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ---------- Önska musik (Lidarr) ----------
+    // ---------- Önska musik (JPFM-servern) ----------
 
-    fun requestAlbum(album: se.jpfm.request.LidarrAlbum, song: String? = null) {
+    fun requestAlbum(album: se.jpfm.request.ServerAlbum, song: String? = null) {
         viewModelScope.launch {
             try {
                 val r = graph.requests.request(album, song)
                 toast(
                     when (r.state) {
-                        se.jpfm.request.RequestState.DONE -> "${album.title} finns redan i Lidarr"
-                        se.jpfm.request.RequestState.WAITING -> "Sparad – skickas när Lidarr går att nå"
+                        se.jpfm.request.RequestState.PENDING -> "Önskad – väntar på godkännande"
+                        se.jpfm.request.RequestState.DONE -> "${album.title} finns redan"
                         se.jpfm.request.RequestState.FAILED -> "Gick inte: ${r.message ?: "okänt fel"}"
                         else -> "Önskad: ${album.title}"
                     },
@@ -88,7 +88,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun requestLater(term: String, artist: String, song: String?) {
         graph.requests.requestLater(term, artist, song)
-        toast("Sparad – skickas när Lidarr går att nå")
+        toast("Sparad – skickas när servern går att nå")
+    }
+
+    /** Ägaren godkänner eller nekar en önskan. */
+    fun decide(r: se.jpfm.request.RemoteRequest, approve: Boolean, reason: String? = null) {
+        viewModelScope.launch {
+            try {
+                if (approve) graph.requests.approve(r.id) else graph.requests.deny(r.id, reason)
+                toast(if (approve) "Godkänd: ${r.title}" else "Nekad: ${r.title}")
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                toast(e.message ?: "Gick inte")
+            }
+        }
+    }
+
+    fun removeRequest(r: se.jpfm.request.RemoteRequest) {
+        viewModelScope.launch {
+            try {
+                graph.requests.remove(r)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                toast(e.message ?: "Gick inte att ta bort")
+            }
+        }
     }
 
     override fun onCleared() {

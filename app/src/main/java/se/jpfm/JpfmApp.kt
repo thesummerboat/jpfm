@@ -89,7 +89,7 @@ class AppGraph(val app: JpfmApp) {
     val radio = se.jpfm.radio.RadioRepository(http, app.filesDir)
     val podcasts = se.jpfm.podcast.PodcastRepository(http, app.filesDir)
     val charts = se.jpfm.charts.ChartRepository(http, app.filesDir)
-    val requests = se.jpfm.request.RequestRepository(http, app.filesDir)
+    val requests = se.jpfm.request.RequestRepository(http, app.filesDir, token = { prefs.accountToken }, plexServerId = { session.server?.machineId })
 
     val queueStore = QueueStore(app.filesDir)
     val queues = QueueBuilder(this)

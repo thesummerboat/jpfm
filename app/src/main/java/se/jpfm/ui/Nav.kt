@@ -27,7 +27,8 @@ sealed interface Screen {
     data class HotList(val which: String) : Screen
     /** Önska musik via Lidarr; [song] när du önskar en låt från topplistan. */
     data class Request(val query: String = "", val song: se.jpfm.plex.ChartSong? = null) : Screen
-    data object LidarrSetup : Screen
+    /** Koppla JPFM-servern (och Lidarr, användare för ägaren). */
+    data object RequestSetup : Screen
     data class HubItems(val hub: Hub) : Screen
     data class Offline(val id: String, val title: String) : Screen
 }

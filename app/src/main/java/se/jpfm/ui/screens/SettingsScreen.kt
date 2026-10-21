@@ -140,20 +140,29 @@ fun SettingsScreen(vm: AppViewModel) {
             }
 
             Group("Önska musik")
-            val lidarr by g.requests.config.collectAsState()
+            val requestServer by g.requests.url.collectAsState()
+            val requestMe by g.requests.me.collectAsState()
             val reqs by g.requests.requests.collectAsState()
             Row(
-                Modifier.fillMaxWidth().clickable { vm.nav.push(Screen.LidarrSetup) }.padding(horizontal = 20.dp, vertical = 12.dp),
+                Modifier.fillMaxWidth().clickable { vm.nav.push(Screen.RequestSetup) }.padding(horizontal = 20.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(Icons.Rounded.CloudDownload, null, tint = Jp.TextDim)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("Lidarr", style = MaterialTheme.typography.bodyLarge)
-                    Text(lidarr?.url ?: "Inte kopplad", style = MaterialTheme.typography.bodySmall, color = if (lidarr != null) Jp.Accent else Jp.TextDim)
+                    Text("JPFM-servern och Lidarr", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        when {
+                            requestServer == null -> "Inte kopplad"
+                            requestMe?.isOwner == true -> "$requestServer · ägare"
+                            else -> requestServer!!
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (requestServer != null) Jp.Accent else Jp.TextDim,
+                    )
                 }
             }
-            if (lidarr != null) {
+            if (requestServer != null) {
                 Row(
                     Modifier.fillMaxWidth().clickable { vm.nav.push(Screen.Request()) }.padding(horizontal = 20.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -161,13 +170,22 @@ fun SettingsScreen(vm: AppViewModel) {
                     Icon(Icons.Rounded.QueueMusic, null, tint = Jp.TextDim)
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Dina önskningar", style = MaterialTheme.typography.bodyLarge)
-                        val active = reqs.count { it.active }
-                        Text(if (active > 0) "$active på väg" else "Sök och önska album och låtar", style = MaterialTheme.typography.bodySmall, color = Jp.TextDim)
+                        Text(if (requestMe?.isOwner == true) "Önskningar" else "Dina önskningar", style = MaterialTheme.typography.bodyLarge)
+                        val pending = requestMe?.pending ?: 0
+                        val active = reqs.count { it.state.active }
+                        Text(
+                            when {
+                                pending > 0 -> "$pending väntar på ditt godkännande"
+                                active > 0 -> "$active på väg"
+                                else -> "Sök och önska album och låtar"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (pending > 0) Jp.Accent else Jp.TextDim,
+                        )
                     }
                 }
             }
-            Hint("Önska musik som inte finns hos dig. Lidarr på servern laddar ner den och Plex läser in den.")
+            Hint("Önska musik som inte finns hos dig. JPFM-servern på Unraid skickar önskningen till Lidarr – andras önskningar först efter att du godkänt dem.")
 
             Group("Android Auto")
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
