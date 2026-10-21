@@ -24,6 +24,8 @@ import androidx.compose.material.icons.rounded.Headset
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Radio
+import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -214,7 +216,15 @@ fun RankedTrack(
  * det artistradio; annars visas den nedtonad.
  */
 @Composable
-fun ChartEntry(hit: ChartHit, isCurrent: Boolean, onClick: () -> Unit, onMore: (() -> Unit)?, modifier: Modifier = Modifier) {
+fun ChartEntry(
+    hit: ChartHit,
+    isCurrent: Boolean,
+    onClick: () -> Unit,
+    onMore: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    requestable: Boolean = false,
+    requested: Boolean = false,
+) {
     val t = hit.track
     RankRow(
         rank = hit.rank,
@@ -222,6 +232,8 @@ fun ChartEntry(hit: ChartHit, isCurrent: Boolean, onClick: () -> Unit, onMore: (
         title = t?.title ?: hit.song.title,
         subtitle = when {
             t != null -> t.displayArtist
+            requested -> "${hit.song.artist} · önskad"
+            requestable -> "${hit.song.artist} · tryck för att önska"
             hit.artist != null -> "${hit.song.artist} · artistradio"
             else -> "${hit.song.artist} · finns inte hos dig"
         },
@@ -229,8 +241,14 @@ fun ChartEntry(hit: ChartHit, isCurrent: Boolean, onClick: () -> Unit, onMore: (
         onClick = onClick,
         onMore = onMore,
         modifier = modifier,
-        dim = t == null,
-        badge = if (t == null && hit.artist != null) Icons.Rounded.Radio else null,
+        dim = t == null && !requestable,
+        badge = when {
+            t != null -> null
+            requested -> Icons.Rounded.Schedule
+            requestable -> Icons.Rounded.CloudDownload
+            hit.artist != null -> Icons.Rounded.Radio
+            else -> null
+        },
     )
 }
 

@@ -57,7 +57,7 @@ object ChartParse {
             val artist = o.optString("artistName").trim()
             val title = o.optString("name").trim()
             if (artist.isEmpty() || title.isEmpty()) return@mapNotNull null
-            ChartSong(artist, title, o.optString("artworkUrl100").ifBlank { null })
+            ChartSong(artist, title, o.optString("artworkUrl100").ifBlank { null }, o.optString("id").ifBlank { null })
         }
     }
 }

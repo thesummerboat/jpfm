@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap
 data class Genre(val id: String, val title: String)
 
 /** En låt på en topplista (artist och titel), som vi letar efter i ditt bibliotek. */
-data class ChartSong(val artist: String, val title: String, val artwork: String? = null)
+data class ChartSong(val artist: String, val title: String, val artwork: String? = null, val appleId: String? = null)
 
 /**
  * En plats på topplistan. [track] finns om låten finns i ditt bibliotek, annars kanske
@@ -395,6 +395,11 @@ class Library(private val session: PlexSession) {
     suspend fun morePlayQueue(id: Long, centerItemId: Long?): PlayQueue {
         val center = centerItemId?.let { "&center=$it" } ?: ""
         return Parse.playQueue(get("/playQueues/$id?own=1&window=50&includeBefore=0&includeAfter=1$center"))
+    }
+
+    /** Ber Plex läsa in musikbiblioteket (ny musik från Lidarr). */
+    suspend fun scan() {
+        session.call { client.text(it, "/library/sections/${sec()}/refresh") }
     }
 
     // ---------- Gilla, spellistor, rapportering ----------

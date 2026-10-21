@@ -89,6 +89,7 @@ class AppGraph(val app: JpfmApp) {
     val radio = se.jpfm.radio.RadioRepository(http, app.filesDir)
     val podcasts = se.jpfm.podcast.PodcastRepository(http, app.filesDir)
     val charts = se.jpfm.charts.ChartRepository(http, app.filesDir)
+    val requests = se.jpfm.request.RequestRepository(http, app.filesDir)
 
     val queueStore = QueueStore(app.filesDir)
     val queues = QueueBuilder(this)
@@ -97,7 +98,12 @@ class AppGraph(val app: JpfmApp) {
     fun start() {
         downloads.init(upstreamFactory)
         session.start()
-        network.start { session.onNetworkChanged() }
+        network.start {
+            session.onNetworkChanged()
+            // Nytt nät (hemma på wifi, Tailscale på): skicka önskningar som väntar.
+            scope.launch { requests.sync() }
+        }
+        scope.launch { requests.sync() }
         scope.launch(Dispatchers.IO) { pruneArtCache() }
     }
 

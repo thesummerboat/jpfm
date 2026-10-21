@@ -162,6 +162,8 @@ private fun ScreenContent(vm: AppViewModel, screen: Screen) {
         is Screen.Category -> se.jpfm.ui.screens.CategoryScreen(vm, screen.mix)
         Screen.Browse -> se.jpfm.ui.screens.BrowseScreen(vm)
         is Screen.HotList -> se.jpfm.ui.screens.HotListScreen(vm, screen.which)
+        is Screen.Request -> se.jpfm.ui.screens.RequestScreen(vm, screen.query, screen.song)
+        Screen.LidarrSetup -> se.jpfm.ui.screens.LidarrSetupScreen(vm)
         is Screen.HubItems -> HubScreen(vm, screen.hub)
         is Screen.Offline -> OfflineScreen(vm, screen.id, screen.title)
     }

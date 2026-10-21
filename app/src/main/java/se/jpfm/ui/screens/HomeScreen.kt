@@ -152,6 +152,14 @@ fun HomeScreen(vm: AppViewModel) {
     val decades = rememberLoadable("decades", section, online, epoch, keep = "home:decades:$k") { if (online) g.library.decades() else emptyList() }
     val subs by g.podcasts.subscriptions.collectAsState()
     val progress by g.podcasts.progress.collectAsState()
+    val requests by g.requests.requests.collectAsState()
+    // Önskningar på väg: fråga Lidarr hur det går när hemskärmen visas.
+    LaunchedEffect(requests.any { it.active }) {
+        while (requests.any { it.active }) {
+            g.requests.sync()
+            kotlinx.coroutines.delay(30_000)
+        }
+    }
     val episodes = rememberLoadable("eps", subs.map { it.id }, epoch, keep = "home:eps") { g.podcasts.latest() }
 
     val list = rememberLazyListState()
@@ -196,6 +204,15 @@ fun HomeScreen(vm: AppViewModel) {
                     item(key = "quick") { QuickGrid(vm, recentHub?.items.orEmpty(), recent.data.orEmpty()) }
                 } else {
                     item(key = "offline-hint") { OfflineHome(vm) }
+                }
+            }
+            if (music) {
+                val active = requests.filter { it.active || (it.state == se.jpfm.request.RequestState.DONE && System.currentTimeMillis() - it.updatedAt < 6 * 3_600_000L) }
+                if (active.isNotEmpty()) {
+                    item(key = "requests") {
+                        SectionHeader("Dina önskningar", subtitle = "Lidarr hämtar till servern", action = "Alla") { vm.nav.push(Screen.Request()) }
+                        active.take(3).forEach { r -> RequestRow(r, onRemove = null, onClick = { vm.nav.push(Screen.Request()) }) }
+                    }
                 }
             }
             if (radio) item(key = "radio") { RadioRow(vm, hubs.data.orEmpty(), online) }
@@ -457,6 +474,10 @@ private fun ChartRow(vm: AppViewModel, chart: List<ChartHit>) {
 fun ChartHitRow(vm: AppViewModel, chart: List<ChartHit>, hit: ChartHit, modifier: Modifier = Modifier) {
     val t = hit.track
     val a = hit.artist
+    val g = LocalGraph.current
+    val canRequest = g.requests.config.collectAsState().value != null
+    val requests by g.requests.requests.collectAsState()
+    val requested = t == null && requests.any { r -> r.song.equals(hit.song.title, ignoreCase = true) && r.artist.equals(hit.song.artist, ignoreCase = true) }
     ChartEntry(
         hit,
         isCurrent = t != null && vm.player.current?.ratingKey == t.ratingKey,
@@ -466,10 +487,13 @@ fun ChartHitRow(vm: AppViewModel, chart: List<ChartHit>, hit: ChartHit, modifier
                     val tracks = chart.mapNotNull { it.track }.distinctBy { it.ratingKey }
                     vm.playTracks(tracks, tracks.indexOfFirst { it.ratingKey == t.ratingKey }.coerceAtLeast(0), "Hett i Sverige")
                 }
+                canRequest -> vm.nav.push(Screen.Request("${hit.song.artist} ${hit.song.title}", hit.song))
                 a != null -> vm.artistRadio(a)
                 else -> vm.toast("${hit.song.title} finns inte i ditt bibliotek")
             }
         },
+        requestable = t == null && canRequest,
+        requested = requested,
         onMore = when {
             t != null -> ({ vm.menu = MenuTarget.ForTrack(t) })
             a != null -> ({ vm.menu = MenuTarget.ForArtist(a) })

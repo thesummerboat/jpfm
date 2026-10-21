@@ -54,6 +54,41 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     init {
         player.connect()
         checkForUpdate()
+        viewModelScope.launch {
+            graph.requests.finished.collect { r ->
+                toast("Klart: ${r.title} finns snart i ditt bibliotek")
+                runCatching { graph.library.scan() }
+                // Plex behöver en stund att läsa in filerna.
+                kotlinx.coroutines.delay(20_000)
+                graph.library.invalidate()
+            }
+        }
+    }
+
+    // ---------- Önska musik (Lidarr) ----------
+
+    fun requestAlbum(album: se.jpfm.request.LidarrAlbum, song: String? = null) {
+        viewModelScope.launch {
+            try {
+                val r = graph.requests.request(album, song)
+                toast(
+                    when (r.state) {
+                        se.jpfm.request.RequestState.DONE -> "${album.title} finns redan i Lidarr"
+                        se.jpfm.request.RequestState.WAITING -> "Sparad – skickas när Lidarr går att nå"
+                        se.jpfm.request.RequestState.FAILED -> "Gick inte: ${r.message ?: "okänt fel"}"
+                        else -> "Önskad: ${album.title}"
+                    },
+                )
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                toast("Kunde inte önska: ${e.message ?: "okänt fel"}")
+            }
+        }
+    }
+
+    fun requestLater(term: String, artist: String, song: String?) {
+        graph.requests.requestLater(term, artist, song)
+        toast("Sparad – skickas när Lidarr går att nå")
     }
 
     override fun onCleared() {

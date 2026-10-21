@@ -19,6 +19,7 @@ class ChartParseTest {
         assertEquals("Sabrina Carpenter", list[0].artist)
         assertEquals("Espresso", list[0].title)
         assertEquals("https://x/100x100bb.jpg", list[0].artwork)
+        assertEquals("1", list[0].appleId)
         assertEquals("Hov1", list[1].artist)
     }
 

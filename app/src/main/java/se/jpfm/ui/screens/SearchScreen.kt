@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Person
@@ -39,6 +40,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -157,7 +159,7 @@ fun SearchScreen(vm: AppViewModel) {
                 })
                 is SearchState.Loading -> LoadingBox()
                 is SearchState.Failed -> ErrorBox(s.message)
-                is SearchState.Done -> Results(vm, s.result, onOpen = { saveRecent(query.trim()) })
+                is SearchState.Done -> Results(vm, s.result, query.trim(), onOpen = { saveRecent(query.trim()) })
             }
         }
     }
@@ -190,9 +192,24 @@ private fun Recents(recents: List<String>, onPick: (String) -> Unit, onClear: ()
 }
 
 @Composable
-private fun Results(vm: AppViewModel, r: SearchResult, onOpen: () -> Unit) {
+private fun Results(vm: AppViewModel, r: SearchResult, query: String, onOpen: () -> Unit) {
+    val canRequest = LocalGraph.current.requests.config.collectAsState().value != null
     if (r.isEmpty) {
-        EmptyBox(Icons.Rounded.SearchOff, "Inga träffar", "Prova ett annat stavsätt eller en kortare sökning.")
+        EmptyBox(
+            Icons.Rounded.SearchOff,
+            "Inga träffar",
+            if (canRequest) "Finns inte hos dig – önska det, så laddar Lidarr ner det." else "Prova ett annat stavsätt eller en kortare sökning.",
+            action = if (canRequest) {
+                {
+                    androidx.compose.material3.Button(
+                        onClick = { onOpen(); vm.nav.push(Screen.Request(query)) },
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = Jp.Accent, contentColor = Jp.OnAccent),
+                    ) { Text("Önska ”$query”") }
+                }
+            } else {
+                null
+            },
+        )
         return
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -245,6 +262,27 @@ private fun Results(vm: AppViewModel, r: SearchResult, onOpen: () -> Unit) {
                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     items(r.playlists, key = { it.ratingKey }) { p ->
                         PlaylistCard(p, onClick = { onOpen(); vm.nav.push(Screen.Playlist(p.ratingKey, p.title)) }, onLongClick = { vm.menu = MenuTarget.ForPlaylist(p) })
+                    }
+                }
+            }
+        }
+        if (canRequest) {
+            item(key = "request") {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 18.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Jp.SurfaceHigh)
+                        .clickable { onOpen(); vm.nav.push(Screen.Request(query)) }
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.CloudDownload, null, tint = Jp.Accent)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Saknas något?", style = MaterialTheme.typography.titleSmall)
+                        Text("Önska ”$query” via Lidarr", style = MaterialTheme.typography.bodySmall, color = Jp.TextDim)
                     }
                 }
             }

@@ -17,6 +17,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.DirectionsCar
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material3.AlertDialog
@@ -48,6 +50,7 @@ import se.jpfm.plex.SessionState
 import se.jpfm.ui.AppViewModel
 import se.jpfm.ui.Format
 import se.jpfm.ui.Jp
+import se.jpfm.ui.Screen
 import se.jpfm.ui.LocalGraph
 import se.jpfm.ui.LocalSettings
 
@@ -136,6 +139,36 @@ fun SettingsScreen(vm: AppViewModel) {
                 }
             }
 
+            Group("Önska musik")
+            val lidarr by g.requests.config.collectAsState()
+            val reqs by g.requests.requests.collectAsState()
+            Row(
+                Modifier.fillMaxWidth().clickable { vm.nav.push(Screen.LidarrSetup) }.padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Rounded.CloudDownload, null, tint = Jp.TextDim)
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Lidarr", style = MaterialTheme.typography.bodyLarge)
+                    Text(lidarr?.url ?: "Inte kopplad", style = MaterialTheme.typography.bodySmall, color = if (lidarr != null) Jp.Accent else Jp.TextDim)
+                }
+            }
+            if (lidarr != null) {
+                Row(
+                    Modifier.fillMaxWidth().clickable { vm.nav.push(Screen.Request()) }.padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.QueueMusic, null, tint = Jp.TextDim)
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Dina önskningar", style = MaterialTheme.typography.bodyLarge)
+                        val active = reqs.count { it.active }
+                        Text(if (active > 0) "$active på väg" else "Sök och önska album och låtar", style = MaterialTheme.typography.bodySmall, color = Jp.TextDim)
+                    }
+                }
+            }
+            Hint("Önska musik som inte finns hos dig. Lidarr på servern laddar ner den och Plex läser in den.")
+
             Group("Android Auto")
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
                 Icon(Icons.Rounded.DirectionsCar, null, tint = Jp.Accent)
@@ -198,7 +231,7 @@ fun SettingsScreen(vm: AppViewModel) {
 }
 
 @Composable
-private fun Group(title: String) {
+internal fun Group(title: String) {
     Column {
         HorizontalDivider(Modifier.padding(top = 18.dp), color = Jp.Outline.copy(alpha = 0.5f))
         Text(
@@ -211,7 +244,7 @@ private fun Group(title: String) {
 }
 
 @Composable
-private fun Hint(text: String) {
+internal fun Hint(text: String) {
     Text(text, style = MaterialTheme.typography.bodySmall, color = Jp.TextFaint, modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp))
     Spacer(Modifier.height(6.dp))
 }
@@ -232,7 +265,7 @@ private fun Toggle(title: String, checked: Boolean, onChange: (Boolean) -> Unit)
 }
 
 @Composable
-private fun Choice(title: String, value: String, options: List<String>, onPick: (Int) -> Unit) {
+internal fun Choice(title: String, value: String, options: List<String>, onPick: (Int) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
         Row(
