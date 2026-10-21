@@ -39,6 +39,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -171,16 +174,17 @@ private fun tabIcon(t: Tab): ImageVector = when (t) {
 @Composable
 private fun Messages(vm: AppViewModel) {
     val host = remember { SnackbarHostState() }
-    val text = vm.message
-    LaunchedEffect(text) {
-        if (text != null) {
-            host.currentSnackbarData?.dismiss()
+    LaunchedEffect(Unit) {
+        // Ett meddelande i taget; ett nytt ersätter det som visas.
+        snapshotFlow { vm.message }.filterNotNull().collect { m ->
             vm.messageShown()
-            host.showSnackbar(text)
+            host.currentSnackbarData?.dismiss()
+            launch { host.showSnackbar(m) }
         }
     }
-    val update = vm.updateMessage
-    LaunchedEffect(update) { if (update != null) host.showSnackbar(update) }
+    LaunchedEffect(Unit) {
+        snapshotFlow { vm.updateMessage }.filterNotNull().collect { m -> launch { host.showSnackbar(m) } }
+    }
     Box(Modifier.fillMaxSize().navigationBarsPadding().padding(bottom = 150.dp), contentAlignment = Alignment.BottomCenter) {
         SnackbarHost(host) { data ->
             Snackbar(

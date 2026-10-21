@@ -1,7 +1,9 @@
 package se.jpfm.plex
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import se.jpfm.plex.PlexClient.Companion.enc
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
@@ -31,7 +33,8 @@ class Library(private val session: PlexSession) {
         val k = "$sec|$key"
         val hit = cache[k]
         if (!force && hit != null && System.currentTimeMillis() - hit.at < ttlMs) return hit.value as T
-        val v = load()
+        // Tolkningen av långa listor (tusentals artister) körs utanför huvudtråden.
+        val v = withContext(Dispatchers.Default) { load() }
         cache[k] = Entry(System.currentTimeMillis(), v)
         return v
     }
@@ -145,14 +148,17 @@ class Library(private val session: PlexSession) {
     }
 
     /** Låtar som låter likt (kräver Plex Pass och sonisk analys på servern). */
-    suspend fun sonicallySimilar(ratingKey: String, limit: Int = 50): List<Track> =
+    suspend fun sonicallySimilar(ratingKey: String, limit: Int = 50): List<Track> = withContext(Dispatchers.Default) {
         runCatching { Parse.tracks(get("/library/metadata/$ratingKey/nearest?limit=$limit&maxDistance=0.3")) }.getOrDefault(emptyList())
+    }
 
-    suspend fun randomTracks(count: Int = 100): List<Track> =
+    suspend fun randomTracks(count: Int = 100): List<Track> = withContext(Dispatchers.Default) {
         Parse.tracks(get("/library/sections/${sec()}/all?type=10&sort=random&X-Plex-Container-Start=0&X-Plex-Container-Size=$count"))
+    }
 
-    suspend fun randomTracksInGenre(genre: Genre, count: Int = 100): List<Track> =
+    suspend fun randomTracksInGenre(genre: Genre, count: Int = 100): List<Track> = withContext(Dispatchers.Default) {
         Parse.tracks(get("/library/sections/${sec()}/all?type=10&genre=${enc(genre.id)}&sort=random&X-Plex-Container-Size=$count"))
+    }
 
     // ---------- Spelköer på servern (radio och mixar) ----------
 

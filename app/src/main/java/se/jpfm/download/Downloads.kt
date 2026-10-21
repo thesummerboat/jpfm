@@ -99,10 +99,10 @@ class Downloads(private val app: JpfmApp, private val scope: CoroutineScope) {
                 }
             })
         }
-        scope.launch(Dispatchers.IO) {
-            load()
-            reloadStates()
-        }
+        // Direkt vid start (små filer): spelaren och bilen måste veta vad som är nedladdat
+        // innan första låten väljs, annars kan en nedladdad låt få en strömadress utan nät.
+        load()
+        reloadStates()
     }
 
     private fun requirementsFor(wifiOnly: Boolean) =

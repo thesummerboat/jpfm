@@ -19,7 +19,7 @@ import se.jpfm.plex.Track
  */
 class BrowseTree(private val g: AppGraph) {
     private val pkg = g.app.packageName
-    private val online get() = g.session.isReady
+    private suspend fun online(): Boolean = g.session.awaitSettled()
 
     /** Senaste hemskärmen, så att "hub:3" pekar på samma rad när bilen frågar efter innehållet. */
     @Volatile
@@ -53,7 +53,7 @@ class BrowseTree(private val g: AppGraph) {
             )
             MediaIds.HOME -> home()
             "hub" -> hubs.getOrNull(id.value.toIntOrNull() ?: -1)?.items.orEmpty().mapNotNull { item(it, "Hem") }
-            MediaIds.PLAYLISTS -> if (online) g.library.playlists().map { playlistFolder(it) } else offlineOf("playlist:")
+            MediaIds.PLAYLISTS -> if (online()) g.library.playlists().map { playlistFolder(it) } else offlineOf("playlist:")
             MediaIds.ARTISTS -> artists()
             "letter" -> g.library.artists().filter { MediaIds.letterOf(it.title) == id.value }.map { artistFolder(it) }
             "artist" -> artistChildren(id.value)
@@ -66,7 +66,7 @@ class BrowseTree(private val g: AppGraph) {
     }
 
     private suspend fun home(): List<MediaItem> {
-        if (!online) return downloads()
+        if (!online()) return downloads()
         val out = mutableListOf<MediaItem>()
         out += playable(MediaIds.SHUFFLE_ALL, "Blanda hela biblioteket", "Slumpvis från all din musik", icon(R.drawable.ic_auto_shuffle), MediaMetadata.MEDIA_TYPE_PLAYLIST, group = "Starta")
         val list = runCatching { g.library.homeHubs() }.getOrDefault(emptyList())
@@ -84,7 +84,7 @@ class BrowseTree(private val g: AppGraph) {
     }
 
     private suspend fun artists(): List<MediaItem> {
-        if (!online) return offlineOf("album:")
+        if (!online()) return offlineOf("album:")
         val all = g.library.artists()
         if (all.size <= 80) return all.map { artistFolder(it) }
         val present = all.map { MediaIds.letterOf(it.title) }.toSet()
@@ -104,13 +104,21 @@ class BrowseTree(private val g: AppGraph) {
 
     private suspend fun albumChildren(key: String): List<MediaItem> {
         val offline = g.downloads.collection("album:$key")
-        val tracks = if (!online && offline != null) g.downloads.tracksOf(offline) else g.library.albumPage(key).tracks
+        val tracks = if (!online() && offline != null) {
+            g.downloads.tracksOf(offline).filter { g.downloads.isDownloaded(it.ratingKey) }
+        } else {
+            g.library.albumPage(key).tracks
+        }
         return tracks.map { trackItem(it, "album:$key") }
     }
 
     private suspend fun playlistChildren(key: String): List<MediaItem> {
         val offline = g.downloads.collection("playlist:$key")
-        val tracks = if (!online && offline != null) g.downloads.tracksOf(offline) else g.library.playlistTracks(key)
+        val tracks = if (!online() && offline != null) {
+            g.downloads.tracksOf(offline).filter { g.downloads.isDownloaded(it.ratingKey) }
+        } else {
+            g.library.playlistTracks(key)
+        }
         return listOf(playable(MediaIds.playPlaylist(key), "Blanda", "${tracks.size} låtar", icon(R.drawable.ic_auto_shuffle), MediaMetadata.MEDIA_TYPE_PLAYLIST)) +
             tracks.map { trackItem(it, "playlist:$key") }
     }
@@ -135,10 +143,12 @@ class BrowseTree(private val g: AppGraph) {
     // ---------- Sök ----------
 
     suspend fun search(query: String): List<MediaItem> {
-        if (!online) {
+        if (!online()) {
+            // Offline: spela från allt nedladdat, med träffen först.
+            val ctx = "offline:" + java.net.URLEncoder.encode(QueueBuilder.ALL_OFFLINE, "UTF-8")
             return g.downloads.allTracks()
                 .filter { t -> listOf(t.title, t.artist, t.album).any { it.contains(query, ignoreCase = true) } }
-                .take(40).map { trackItem(it, "radio") }
+                .take(40).map { trackItem(it, ctx) }
         }
         val r = g.library.search(query)
         return r.artists.take(5).map { artistFolder(it, "Artister") } +

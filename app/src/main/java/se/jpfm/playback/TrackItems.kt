@@ -2,6 +2,7 @@ package se.jpfm.playback
 
 import android.net.Uri
 import android.os.Bundle
+import androidx.media3.common.HeartRating
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
@@ -67,6 +68,8 @@ object TrackItems {
         .setDiscNumber(t.disc)
         .setReleaseYear(t.year)
         .setDurationMs(t.durationMs.takeIf { it > 0 })
+        // Gillad syns för appen, notisen och bilen (och gör att ändringen märks).
+        .setUserRating(HeartRating(t.isLoved))
         .setIsBrowsable(false)
         .setIsPlayable(true)
         .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)

@@ -26,7 +26,8 @@ data class BuiltQueue(
 class QueueBuilder(private val g: AppGraph) {
     private val library get() = g.library
     private val downloads get() = g.downloads
-    private val online: Boolean get() = g.session.isReady
+    /** Väntar en stund om appen just startat och fortfarande letar efter servern. */
+    private suspend fun online(): Boolean = g.session.awaitSettled()
 
     fun mediaItems(q: BuiltQueue): List<MediaItem> {
         val quality = g.currentQuality()
@@ -44,8 +45,8 @@ class QueueBuilder(private val g: AppGraph) {
 
     suspend fun album(key: String, startTrackKey: String? = null, shuffle: Boolean = false): BuiltQueue {
         val offline = downloads.collection("album:$key")
-        val (title, tracks) = if (!online && offline != null) {
-            offline.title to downloads.tracksOf(offline)
+        val (title, tracks) = if (!online() && offline != null) {
+            offline.title to downloads.tracksOf(offline).filter { downloads.isDownloaded(it.ratingKey) }
         } else {
             val page = library.albumPage(key)
             page.album.title to page.tracks
@@ -55,8 +56,13 @@ class QueueBuilder(private val g: AppGraph) {
 
     suspend fun playlist(key: String, startTrackKey: String? = null, shuffle: Boolean = false, title: String? = null): BuiltQueue {
         val offline = downloads.collection("playlist:$key")
-        val tracks = if (!online && offline != null) downloads.tracksOf(offline) else library.playlistTracks(key)
-        val name = title ?: offline?.title ?: library.playlists().firstOrNull { it.ratingKey == key }?.title ?: "Spellista"
+        val isOnline = online()
+        val tracks = if (!isOnline && offline != null) {
+            downloads.tracksOf(offline).filter { downloads.isDownloaded(it.ratingKey) }
+        } else {
+            library.playlistTracks(key)
+        }
+        val name = title ?: offline?.title ?: (if (isOnline) library.playlists().firstOrNull { it.ratingKey == key }?.title else null) ?: "Spellista"
         return BuiltQueue(tracks, startIndex(tracks, startTrackKey, shuffle), QueueContext(QueueContext.Kind.PLAYLIST, name, key), shuffle)
     }
 
@@ -91,7 +97,7 @@ class QueueBuilder(private val g: AppGraph) {
     }
 
     suspend fun shuffleLibrary(): BuiltQueue {
-        if (!online) return offline(ALL_OFFLINE, null, true)
+        if (!online()) return offline(ALL_OFFLINE, null, true)
         val tracks = library.randomTracks(60)
         return BuiltQueue(tracks, 0, QueueContext(QueueContext.Kind.SHUFFLE_LIBRARY, "Hela biblioteket blandat"))
     }
@@ -143,7 +149,7 @@ class QueueBuilder(private val g: AppGraph) {
     }
 
     private suspend fun trackOf(ratingKey: String): Track? =
-        downloads.track(ratingKey) ?: if (online) runCatching { library.track(ratingKey) }.getOrNull() else null
+        downloads.track(ratingKey) ?: if (online()) runCatching { library.track(ratingKey) }.getOrNull() else null
 
     /** Lägger till en låt eller samling i slutet av kön (Android Auto "lägg i kö"). */
     suspend fun resolveForQueue(item: MediaItem): List<MediaItem> {
@@ -166,7 +172,7 @@ class QueueBuilder(private val g: AppGraph) {
         val albumHint = extras?.getString(EXTRA_ALBUM)
         val titleHint = extras?.getString(EXTRA_TITLE)
 
-        if (!online) {
+        if (!online()) {
             val all = downloads.allTracks()
             val hits = all.filter { t ->
                 listOf(t.title, t.artist, t.album, t.displayArtist).any { it.contains(q, ignoreCase = true) }
@@ -204,7 +210,7 @@ class QueueBuilder(private val g: AppGraph) {
     /** Fler låtar till en radiokö som håller på att ta slut. */
     suspend fun more(ctx: QueueContext, existing: List<Track>): List<Track> {
         val have = existing.takeLast(400).map { it.ratingKey }.toHashSet()
-        if (!online) {
+        if (!online()) {
             return downloads.allTracks().filter { it.ratingKey !in have }.shuffled().take(20)
         }
         when (ctx.kind) {
@@ -250,6 +256,12 @@ class QueueBuilder(private val g: AppGraph) {
         }
 
         fun contextMetadata(ctx: QueueContext): MediaMetadata =
-            MediaMetadata.Builder().setTitle(ctx.title).setExtras(ctx.toBundle()).build()
+            MediaMetadata.Builder()
+                .setTitle(ctx.title)
+                // MediaMetadata jämför inte innehållet i extras: utan detta fält skulle två köer
+                // med samma titel (t.ex. två stationer som heter "Radio") räknas som samma.
+                .setDescription("${ctx.kind}|${ctx.id}|${ctx.playQueueId}")
+                .setExtras(ctx.toBundle())
+                .build()
     }
 }

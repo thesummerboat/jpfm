@@ -12,6 +12,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.ShuffleOrder.DefaultShuffleOrder
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
@@ -39,7 +40,9 @@ import se.jpfm.JpfmApp
 import se.jpfm.Leveling
 import se.jpfm.MainActivity
 import se.jpfm.R
+import se.jpfm.plex.SessionState
 import se.jpfm.plex.Track
+import se.jpfm.plex.TrackJson
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -60,6 +63,12 @@ class PlaybackService : MediaLibraryService() {
     private val searchResults = ConcurrentHashMap<String, List<MediaItem>>()
 
     private var tickJob: Job? = null
+    private var retryJob: Job? = null
+    private var sleepJob: Job? = null
+    private var sleepEndsAt = 0L
+    private var sleepAtTrackEnd = false
+    /** Blanda när nästa kö från bilen är på plats (blandningen ska börja på vald låt). */
+    private var pendingShuffle = false
     private var extending = false
     private var lastErrorId: String? = null
     private var errorCount = 0
@@ -110,20 +119,30 @@ class PlaybackService : MediaLibraryService() {
         )
 
         restoreQueue()
+
+        // Bilen kan ha frågat innan servern hittades: be den hämta flikarna igen.
+        scope.launch {
+            graph.session.state.collect { st ->
+                if (st is SessionState.Ready || st is SessionState.Offline) {
+                    for (id in listOf(MediaIds.HOME, MediaIds.PLAYLISTS, MediaIds.ARTISTS, MediaIds.DOWNLOADS)) {
+                        session?.notifyChildrenChanged(id, 50, null)
+                    }
+                }
+            }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        if (!player.playWhenReady || player.mediaItemCount == 0 || player.playbackState == Player.STATE_ENDED) {
-            saveQueue()
-            stopSelf()
-        }
+        saveQueue()
+        // Media3 stoppar tjänsten om inget spelas (även efter ett fel), annars spelar musiken vidare.
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
         saveQueue()
-        report("stopped")
+        report("stopped", appScope = true)
         session?.release()
         session = null
         player.removeListener(listener)
@@ -184,10 +203,13 @@ class PlaybackService : MediaLibraryService() {
         val remaining = player.mediaItemCount - player.currentMediaItemIndex - 1
         if (remaining > 3) return
         extending = true
+        val firstId = player.getMediaItemAt(0).mediaId
         scope.launch {
             try {
                 val more = graph.queues.more(ctx, queueTracks())
-                if (more.isNotEmpty()) player.addMediaItems(more.map { graph.queues.mediaItem(it) })
+                // Kön kan ha bytts medan vi hämtade (du startade något annat).
+                val same = context() == ctx && player.mediaItemCount > 0 && player.getMediaItemAt(0).mediaId == firstId
+                if (same && more.isNotEmpty()) player.addMediaItems(more.map { graph.queues.mediaItem(it) })
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
             } finally {
@@ -234,11 +256,19 @@ class PlaybackService : MediaLibraryService() {
 
     // ---------- Plex: vad spelas ----------
 
-    private fun report(state: String, track: Track? = TrackItems.track(player.currentMediaItem), position: Long = player.currentPosition) {
+    private fun report(
+        state: String,
+        track: Track? = TrackItems.track(player.currentMediaItem),
+        position: Long = player.currentPosition,
+        appScope: Boolean = false,
+    ) {
         val t = track ?: return
         if (!graph.session.isReady) return
         val duration = player.duration.takeIf { it > 0 && track == TrackItems.track(player.currentMediaItem) } ?: t.durationMs
-        scope.launch { runCatching { graph.library.timeline(t, state, position.coerceAtLeast(0), duration) } }
+        // När tjänsten stängs måste rapporten överleva den.
+        (if (appScope) graph.scope else scope).launch {
+            runCatching { graph.library.timeline(t, state, position.coerceAtLeast(0), duration) }
+        }
     }
 
     private fun startTicker() {
@@ -289,12 +319,111 @@ class PlaybackService : MediaLibraryService() {
         scope.launch {
             val q = runCatching { graph.queues.sonicRadio(t) }.getOrNull() ?: return@launch
             val position = player.currentPosition
-            player.setMediaItems(graph.queues.mediaItems(q), 0, position)
             player.playlistMetadata = QueueBuilder.contextMetadata(q.context)
             player.shuffleModeEnabled = false
+            player.setMediaItems(graph.queues.mediaItems(q), 0, position)
             player.prepare()
             player.play()
         }
+    }
+
+    // ---------- Kö: spela härnäst och lägg till ----------
+
+    /** Ordningen låtarna spelas i (blandad om blanda är på). */
+    private fun playOrder(): MutableList<Int> {
+        val tl = player.currentTimeline
+        val out = mutableListOf<Int>()
+        if (tl.isEmpty) return out
+        var i = tl.getFirstWindowIndex(player.shuffleModeEnabled)
+        while (i != C.INDEX_UNSET && out.size <= tl.windowCount) {
+            out += i
+            i = tl.getNextWindowIndex(i, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
+        }
+        return out
+    }
+
+    /**
+     * Spela härnäst / lägg i kön. Med blanda på lägger ExoPlayer annars nya låtar på slumpade
+     * platser, så vi bygger blandningsordningen själva.
+     */
+    private fun enqueue(tracks: List<Track>, next: Boolean) {
+        if (tracks.isEmpty()) return
+        val items = tracks.map { graph.queues.mediaItem(it) }
+        if (player.mediaItemCount == 0) {
+            player.playlistMetadata = QueueBuilder.contextMetadata(QueueContext(QueueContext.Kind.TRACKS, tracks.first().title))
+            player.setMediaItems(items)
+            player.prepare()
+            player.play()
+            return
+        }
+        if (!player.shuffleModeEnabled) {
+            val at = if (next) player.currentMediaItemIndex + 1 else player.mediaItemCount
+            player.addMediaItems(at, items)
+            return
+        }
+        val order = playOrder()
+        val start = player.mediaItemCount
+        player.addMediaItems(items)
+        val added = (start until start + items.size).toList()
+        val pos = order.indexOf(player.currentMediaItemIndex)
+        val merged = if (next && pos >= 0) order.subList(0, pos + 1) + added + order.subList(pos + 1, order.size) else order + added
+        player.setShuffleOrder(DefaultShuffleOrder(merged.toIntArray(), System.nanoTime()))
+    }
+
+    /** Ny blandning som börjar med låten som spelas, så att inget hoppas över. */
+    private fun reshuffleFromCurrent() {
+        val n = player.mediaItemCount
+        if (n < 2) return
+        val cur = player.currentMediaItemIndex
+        val rest = (0 until n).filter { it != cur }.shuffled()
+        player.setShuffleOrder(DefaultShuffleOrder((listOf(cur) + rest).toIntArray(), System.nanoTime()))
+    }
+
+    // ---------- Sovtimer ----------
+
+    /** minutes > 0: pausa om så många minuter. -1: när låten är slut. 0: av. */
+    private fun setSleep(minutes: Int) {
+        sleepJob?.cancel()
+        player.pauseAtEndOfMediaItems = false
+        sleepAtTrackEnd = false
+        sleepEndsAt = 0L
+        when {
+            minutes == -1 -> {
+                sleepAtTrackEnd = true
+                player.pauseAtEndOfMediaItems = true
+                val left = (player.duration - player.currentPosition).takeIf { player.duration > 0 } ?: 0L
+                sleepEndsAt = System.currentTimeMillis() + left.coerceAtLeast(0)
+            }
+            minutes > 0 -> {
+                val total = minutes * 60_000L
+                sleepEndsAt = System.currentTimeMillis() + total
+                sleepJob = scope.launch {
+                    delay((total - SLEEP_FADE_MS).coerceAtLeast(0))
+                    if (player.isPlaying) {
+                        val start = player.volume
+                        val steps = 25
+                        for (i in 1..steps) {
+                            player.volume = start * (1f - i / steps.toFloat())
+                            delay(SLEEP_FADE_MS / steps)
+                        }
+                        player.pause()
+                    }
+                    applyLoudness()
+                    sleepEndsAt = 0L
+                    publishSleep()
+                }
+            }
+        }
+        publishSleep()
+    }
+
+    private fun publishSleep() {
+        session?.setSessionExtras(
+            Bundle().apply {
+                putLong(EXTRA_SLEEP_AT, sleepEndsAt)
+                putBoolean(EXTRA_SLEEP_TRACK_END, sleepAtTrackEnd)
+            },
+        )
     }
 
     // ---------- Fel ----------
@@ -321,13 +450,20 @@ class PlaybackService : MediaLibraryService() {
                 player.prepare()
                 player.play()
             }
-            network && errorCount <= 3 -> scope.launch {
-                delay(1_500L * errorCount)
-                // Ny adress till servern om nätet bytts (wifi → mobildata).
-                if (!graph.session.isReady || errorCount >= 2) graph.session.connect()
-                player.seekTo(index, position)
-                player.prepare()
-                player.play()
+            network && errorCount <= 3 -> {
+                retryJob?.cancel()
+                val id = item.mediaId
+                retryJob = scope.launch {
+                    delay(1_500L * errorCount)
+                    // Ny adress till servern om nätet bytts (wifi → mobildata).
+                    if (!graph.session.isReady || errorCount >= 2) graph.session.connect()
+                    // Bara om du fortfarande vill lyssna på samma låt.
+                    if (player.playbackState == Player.STATE_IDLE && player.playWhenReady && player.currentMediaItem?.mediaId == id) {
+                        player.seekTo(index, position)
+                        player.prepare()
+                        player.play()
+                    }
+                }
             }
             player.hasNextMediaItem() && errorCount <= 6 -> {
                 player.seekToNextMediaItem()
@@ -339,7 +475,18 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private val listener = object : Player.Listener {
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (!playWhenReady) retryJob?.cancel()
+            if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM && sleepAtTrackEnd) {
+                player.pauseAtEndOfMediaItems = false
+                sleepAtTrackEnd = false
+                sleepEndsAt = 0L
+                publishSleep()
+            }
+        }
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            retryJob?.cancel()
             // Föregående låt: klar eller avbruten.
             reported?.let { prev ->
                 val pos = if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) prev.durationMs else reportedPosition
@@ -379,6 +526,10 @@ class PlaybackService : MediaLibraryService() {
 
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
             if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) {
+                if (pendingShuffle && !timeline.isEmpty) {
+                    pendingShuffle = false
+                    player.shuffleModeEnabled = true
+                }
                 maybeExtend()
                 prefetchNext()
                 saveQueueSoon()
@@ -386,6 +537,7 @@ class PlaybackService : MediaLibraryService() {
         }
 
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+            if (shuffleModeEnabled) reshuffleFromCurrent()
             applyLoudness()
             saveQueueSoon()
         }
@@ -406,9 +558,17 @@ class PlaybackService : MediaLibraryService() {
             val commands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                 .add(CMD_LOVE)
                 .add(CMD_RADIO)
+                .add(CMD_ENQUEUE)
+                .add(CMD_SLEEP)
                 .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(commands)
+                .setSessionExtras(
+                    Bundle().apply {
+                        putLong(EXTRA_SLEEP_AT, sleepEndsAt)
+                        putBoolean(EXTRA_SLEEP_TRACK_END, sleepAtTrackEnd)
+                    },
+                )
                 .setCustomLayout(buttons(TrackItems.track(player.currentMediaItem)?.isLoved == true))
                 .build()
         }
@@ -422,6 +582,11 @@ class PlaybackService : MediaLibraryService() {
             when (customCommand.customAction) {
                 CMD_LOVE.customAction -> toggleLove()
                 CMD_RADIO.customAction -> startSonicRadio()
+                CMD_ENQUEUE.customAction -> enqueue(
+                    TrackJson.listFromJson(runCatching { org.json.JSONArray(args.getString(ARG_TRACKS).orEmpty()) }.getOrNull()),
+                    args.getBoolean(ARG_NEXT),
+                )
+                CMD_SLEEP.customAction -> setSleep(args.getInt(ARG_MINUTES))
                 else -> return Futures.immediateFuture(SessionResult(SessionError.ERROR_NOT_SUPPORTED))
             }
             return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -532,7 +697,8 @@ class PlaybackService : MediaLibraryService() {
                 throw IllegalStateException("Hittade inget att spela")
             }
             player.playlistMetadata = QueueBuilder.contextMetadata(built.context)
-            player.shuffleModeEnabled = built.shuffle
+            player.shuffleModeEnabled = false
+            pendingShuffle = built.shuffle
             MediaSession.MediaItemsWithStartPosition(graph.queues.mediaItems(built), built.startIndex, C.TIME_UNSET)
         }
 
@@ -544,7 +710,8 @@ class PlaybackService : MediaLibraryService() {
                 ?: throw IllegalStateException("Ingen sparad kö")
             val q = BuiltQueue(saved.tracks, saved.index, saved.context ?: QueueContext(QueueContext.Kind.TRACKS, ""), saved.shuffle)
             saved.context?.let { player.playlistMetadata = QueueBuilder.contextMetadata(it) }
-            player.shuffleModeEnabled = saved.shuffle
+            player.shuffleModeEnabled = false
+            pendingShuffle = saved.shuffle
             MediaSession.MediaItemsWithStartPosition(graph.queues.mediaItems(q), saved.index, saved.positionMs)
         }
     }
@@ -552,6 +719,14 @@ class PlaybackService : MediaLibraryService() {
     companion object {
         val CMD_LOVE = SessionCommand("se.jpfm.LOVE", Bundle.EMPTY)
         val CMD_RADIO = SessionCommand("se.jpfm.RADIO", Bundle.EMPTY)
+        val CMD_ENQUEUE = SessionCommand("se.jpfm.ENQUEUE", Bundle.EMPTY)
+        val CMD_SLEEP = SessionCommand("se.jpfm.SLEEP", Bundle.EMPTY)
+        const val ARG_TRACKS = "tracks"
+        const val ARG_NEXT = "next"
+        const val ARG_MINUTES = "minutes"
+        const val EXTRA_SLEEP_AT = "se.jpfm.sleepAt"
+        const val EXTRA_SLEEP_TRACK_END = "se.jpfm.sleepTrackEnd"
+        private const val SLEEP_FADE_MS = 10_000L
 
         private val DECODER_ERRORS = setOf(
             PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,

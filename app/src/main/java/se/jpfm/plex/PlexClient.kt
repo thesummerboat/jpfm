@@ -216,7 +216,8 @@ class PlexClient(val clientId: String, private val http: OkHttpClient) {
 
     suspend fun get(server: PlexServer, path: String): JSONObject {
         val body = execute(request(url(server, path), server.token).get().build())
-        return if (body.isBlank()) JSONObject() else JSONObject(body)
+        // Stora bibliotek ger svar på flera MB: tolka utanför huvudtråden.
+        return withContext(Dispatchers.Default) { if (body.isBlank()) JSONObject() else JSONObject(body) }
     }
 
     suspend fun text(server: PlexServer, path: String, accept: String? = null): String {

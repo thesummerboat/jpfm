@@ -27,6 +27,7 @@ import se.jpfm.playback.QueueBuilder
 import se.jpfm.playback.QueueContext
 import se.jpfm.playback.TrackItems
 import se.jpfm.plex.Track
+import se.jpfm.plex.TrackJson
 
 /** En rad i kön: platsen i spelarens lista och låten. */
 data class QueueEntry(val index: Int, val track: Track, val mediaId: String)
@@ -69,24 +70,44 @@ class PlayerConnection(private val context: Context, private val g: AppGraph, pr
 
     val hasMedia: Boolean get() = current != null
 
-    /** Sovtimer: när musiken pausas (millisekunder sedan epoch), eller null. */
+    /** Sovtimer (sköts av spelartjänsten): när musiken pausas, eller null. */
     var sleepEndsAt by mutableStateOf<Long?>(null)
         private set
     var sleepAtTrackEnd by mutableStateOf(false)
         private set
-    private var sleepJob: Job? = null
 
     private var ticker: Job? = null
+    private var connectJob: Job? = null
+    /** Något du bad om att spela innan spelaren hunnit ansluta (t.ex. röststyrning vid start). */
+    private var pending: BuiltQueue? = null
 
     fun connect() {
-        if (controller != null) return
-        scope.launch {
+        if (controller != null || connectJob?.isActive == true) return
+        connectJob = scope.launch {
             val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
-            val c = runCatching { MediaController.Builder(context, token).buildAsync().await() }.getOrNull() ?: return@launch
+            val c = runCatching {
+                MediaController.Builder(context, token)
+                    .setListener(object : MediaController.Listener {
+                        override fun onExtrasChanged(controller: MediaController, extras: Bundle) = readSleep(extras)
+                    })
+                    .buildAsync()
+                    .await()
+            }.getOrNull() ?: return@launch
             controller = c
             c.addListener(listener)
             syncAll(c)
+            readSleep(c.sessionExtras)
+            pending?.let {
+                pending = null
+                play(it)
+            }
         }
+    }
+
+    private fun readSleep(extras: Bundle) {
+        val at = extras.getLong(PlaybackService.EXTRA_SLEEP_AT, 0L)
+        sleepEndsAt = at.takeIf { it > 0 }
+        sleepAtTrackEnd = extras.getBoolean(PlaybackService.EXTRA_SLEEP_TRACK_END, false)
     }
 
     fun release() {
@@ -97,15 +118,6 @@ class PlayerConnection(private val context: Context, private val g: AppGraph, pr
     }
 
     private val listener = object : Player.Listener {
-        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            if (sleepAtTrackEnd && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
-                controller?.pause()
-                controller?.seekTo(0)
-                sleepAtTrackEnd = false
-                sleepEndsAt = null
-            }
-        }
-
         override fun onEvents(player: Player, events: Player.Events) {
             if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)) {
                 syncQueue(player)
@@ -197,13 +209,20 @@ class PlayerConnection(private val context: Context, private val g: AppGraph, pr
     // ---------- Styrning ----------
 
     fun play(q: BuiltQueue) {
-        val c = controller ?: return
         if (q.tracks.isEmpty()) return
+        val c = controller ?: run {
+            pending = q
+            connect()
+            return
+        }
         error = null
-        c.setMediaItems(g.queues.mediaItems(q), q.startIndex, 0L)
+        // Sammanhanget först, så att tjänsten inte fyller på den nya kön som om den vore radio.
+        c.shuffleModeEnabled = false
         c.playlistMetadata = QueueBuilder.contextMetadata(q.context)
-        c.shuffleModeEnabled = q.shuffle
+        c.setMediaItems(g.queues.mediaItems(q), q.startIndex, 0L)
         c.prepare()
+        // Blanda efteråt: tjänsten blandar då med vald låt först.
+        if (q.shuffle) c.shuffleModeEnabled = true
         c.play()
     }
 
@@ -256,28 +275,22 @@ class PlayerConnection(private val context: Context, private val g: AppGraph, pr
         c.play()
     }
 
-    fun playNext(tracks: List<Track>) {
+    /** Tjänsten lägger in låtarna, så att det blir rätt även när kön är blandad. */
+    private fun enqueue(tracks: List<Track>, next: Boolean) {
         val c = controller ?: return
-        val items = tracks.map { g.queues.mediaItem(it) }
-        if (c.mediaItemCount == 0) {
-            play(g.queues.tracks(tracks, 0, tracks.firstOrNull()?.title ?: ""))
-            return
-        }
-        val at = (c.nextMediaItemIndex.takeIf { it != C.INDEX_UNSET } ?: c.mediaItemCount)
-            .coerceAtMost(c.mediaItemCount)
-        // Med blandning: lägg direkt efter låten som spelas i listan.
-        val index = if (c.shuffleModeEnabled) c.currentMediaItemIndex + 1 else at
-        c.addMediaItems(index, items)
+        if (tracks.isEmpty()) return
+        c.sendCustomCommand(
+            PlaybackService.CMD_ENQUEUE,
+            Bundle().apply {
+                putString(PlaybackService.ARG_TRACKS, TrackJson.listToJson(tracks).toString())
+                putBoolean(PlaybackService.ARG_NEXT, next)
+            },
+        )
     }
 
-    fun addToQueue(tracks: List<Track>) {
-        val c = controller ?: return
-        if (c.mediaItemCount == 0) {
-            play(g.queues.tracks(tracks, 0, tracks.firstOrNull()?.title ?: ""))
-            return
-        }
-        c.addMediaItems(tracks.map { g.queues.mediaItem(it) })
-    }
+    fun playNext(tracks: List<Track>) = enqueue(tracks, next = true)
+
+    fun addToQueue(tracks: List<Track>) = enqueue(tracks, next = false)
 
     fun removeAt(index: Int) {
         controller?.removeMediaItem(index)
@@ -315,41 +328,12 @@ class PlayerConnection(private val context: Context, private val g: AppGraph, pr
     fun currentItem(): MediaItem? = controller?.currentMediaItem
 
     /** Pausar efter [minutes] minuter (null stänger av), med en mjuk nedtoning på slutet. */
-    fun setSleepTimer(minutes: Int?) {
-        sleepJob?.cancel()
-        sleepAtTrackEnd = false
-        if (minutes == null) {
-            sleepEndsAt = null
-            return
-        }
-        val total = minutes * 60_000L
-        sleepEndsAt = System.currentTimeMillis() + total
-        sleepJob = scope.launch {
-            delay((total - FADE_MS).coerceAtLeast(0))
-            val c = controller
-            if (c != null && c.isPlaying) {
-                val start = c.volume
-                val steps = 20
-                for (i in 1..steps) {
-                    c.volume = start * (1f - i / steps.toFloat())
-                    delay(FADE_MS / steps)
-                }
-                c.pause()
-                c.volume = start
-            }
-            sleepEndsAt = null
-        }
-    }
+    fun setSleepTimer(minutes: Int?) = sendSleep(minutes ?: 0)
 
     /** Pausar när låten som spelas är slut. */
-    fun sleepAtEndOfTrack() {
-        sleepJob?.cancel()
-        val c = controller ?: return
-        sleepAtTrackEnd = true
-        sleepEndsAt = System.currentTimeMillis() + (c.duration - c.currentPosition).coerceAtLeast(0)
-    }
+    fun sleepAtEndOfTrack() = sendSleep(-1)
 
-    private companion object {
-        const val FADE_MS = 10_000L
+    private fun sendSleep(minutes: Int) {
+        controller?.sendCustomCommand(PlaybackService.CMD_SLEEP, Bundle().apply { putInt(PlaybackService.ARG_MINUTES, minutes) })
     }
 }

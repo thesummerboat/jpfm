@@ -5,6 +5,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -50,6 +52,17 @@ class PlexSession(
     private var connectJob: Job? = null
 
     val isReady: Boolean get() = _state.value is SessionState.Ready
+
+    /**
+     * Väntar tills appen vet om servern går att nå (högst [timeoutMs]). Används när bilen eller
+     * rösten startar appen från noll, så att vi inte felaktigt tror att vi är offline.
+     */
+    suspend fun awaitSettled(timeoutMs: Long = 12_000): Boolean {
+        withTimeoutOrNull(timeoutMs) {
+            state.first { it !is SessionState.Starting && it !is SessionState.Connecting }
+        }
+        return isReady
+    }
 
     fun start() {
         if (prefs.accountToken == null) {

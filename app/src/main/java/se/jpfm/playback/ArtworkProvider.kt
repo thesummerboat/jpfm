@@ -23,7 +23,7 @@ class ArtworkProvider : ContentProvider() {
     override fun getType(uri: Uri): String = "image/jpeg"
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
-        val path = uri.getQueryParameter("p") ?: throw FileNotFoundException(uri.toString())
+        val path = uri.getQueryParameter("p")?.takeIf { ALLOWED.matches(it) } ?: throw FileNotFoundException(uri.toString())
         val size = uri.getQueryParameter("s")?.toIntOrNull()?.coerceIn(64, 1200) ?: DEFAULT_SIZE
         val ctx = context ?: throw FileNotFoundException("Ingen context")
         val file = ensure(ctx.applicationContext as JpfmApp, path, size)
@@ -38,6 +38,9 @@ class ArtworkProvider : ContentProvider() {
 
     companion object {
         const val AUTHORITY = "se.jpfm.artwork"
+
+        /** Bara omslag från musikbiblioteket – inte vilka adresser som helst på servern. */
+        private val ALLOWED = Regex("""^/(library/metadata|library/collections|playlists)/\d+/(thumb|art|composite)(/\d+)?$""")
         const val DEFAULT_SIZE = 600
 
         fun uri(thumb: String, size: Int = DEFAULT_SIZE): Uri = Uri.Builder()
