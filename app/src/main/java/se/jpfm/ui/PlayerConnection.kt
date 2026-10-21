@@ -9,7 +9,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
@@ -70,6 +69,13 @@ class PlayerConnection(private val context: Context, private val g: AppGraph, pr
 
     val hasMedia: Boolean get() = current != null
 
+    /** Sovtimer: när musiken pausas (millisekunder sedan epoch), eller null. */
+    var sleepEndsAt by mutableStateOf<Long?>(null)
+        private set
+    var sleepAtTrackEnd by mutableStateOf(false)
+        private set
+    private var sleepJob: Job? = null
+
     private var ticker: Job? = null
 
     fun connect() {
@@ -91,6 +97,15 @@ class PlayerConnection(private val context: Context, private val g: AppGraph, pr
     }
 
     private val listener = object : Player.Listener {
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            if (sleepAtTrackEnd && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                controller?.pause()
+                controller?.seekTo(0)
+                sleepAtTrackEnd = false
+                sleepEndsAt = null
+            }
+        }
+
         override fun onEvents(player: Player, events: Player.Events) {
             if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)) {
                 syncQueue(player)
@@ -299,6 +314,42 @@ class PlayerConnection(private val context: Context, private val g: AppGraph, pr
 
     fun currentItem(): MediaItem? = controller?.currentMediaItem
 
-    @Suppress("unused")
-    private fun metadataOf(item: MediaItem?): MediaMetadata? = item?.mediaMetadata
+    /** Pausar efter [minutes] minuter (null stänger av), med en mjuk nedtoning på slutet. */
+    fun setSleepTimer(minutes: Int?) {
+        sleepJob?.cancel()
+        sleepAtTrackEnd = false
+        if (minutes == null) {
+            sleepEndsAt = null
+            return
+        }
+        val total = minutes * 60_000L
+        sleepEndsAt = System.currentTimeMillis() + total
+        sleepJob = scope.launch {
+            delay((total - FADE_MS).coerceAtLeast(0))
+            val c = controller
+            if (c != null && c.isPlaying) {
+                val start = c.volume
+                val steps = 20
+                for (i in 1..steps) {
+                    c.volume = start * (1f - i / steps.toFloat())
+                    delay(FADE_MS / steps)
+                }
+                c.pause()
+                c.volume = start
+            }
+            sleepEndsAt = null
+        }
+    }
+
+    /** Pausar när låten som spelas är slut. */
+    fun sleepAtEndOfTrack() {
+        sleepJob?.cancel()
+        val c = controller ?: return
+        sleepAtTrackEnd = true
+        sleepEndsAt = System.currentTimeMillis() + (c.duration - c.currentPosition).coerceAtLeast(0)
+    }
+
+    private companion object {
+        const val FADE_MS = 10_000L
+    }
 }

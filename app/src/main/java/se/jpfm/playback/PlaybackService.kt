@@ -13,6 +13,7 @@ import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.CommandButton
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaLibraryService.LibraryParams
@@ -37,6 +38,7 @@ import kotlinx.coroutines.withContext
 import se.jpfm.JpfmApp
 import se.jpfm.Leveling
 import se.jpfm.MainActivity
+import se.jpfm.R
 import se.jpfm.plex.Track
 import java.util.concurrent.ConcurrentHashMap
 
@@ -99,6 +101,13 @@ class PlaybackService : MediaLibraryService() {
             .setSessionActivity(open)
             .setCustomLayout(buttons(loved = false))
             .build()
+
+        setMediaNotificationProvider(
+            DefaultMediaNotificationProvider.Builder(this)
+                .setChannelName(R.string.playback_channel)
+                .build()
+                .apply { setSmallIcon(R.drawable.ic_notification) },
+        )
 
         restoreQueue()
     }

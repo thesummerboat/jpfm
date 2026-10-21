@@ -57,7 +57,10 @@ import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -320,6 +323,7 @@ fun NowPlaying(vm: AppViewModel, onClose: () -> Unit) {
                 Spacer(Modifier.weight(1f))
                 QualityChip(track, p.transcoded, g.downloads.isDownloaded(track.ratingKey))
                 Spacer(Modifier.weight(1f))
+                SleepButton(p, accent)
                 IconButton(onClick = { vm.sonicRadio(track) }) { Icon(Icons.Rounded.Radio, "Låtradio", tint = Jp.Text.copy(alpha = 0.75f)) }
                 PanelToggle(Icons.Rounded.QueueMusic, "Kö", panel == Panel.QUEUE, accent) {
                     panel = if (panel == Panel.QUEUE) Panel.COVER else Panel.QUEUE
@@ -348,6 +352,57 @@ fun NowPlaying(vm: AppViewModel, onClose: () -> Unit) {
 private fun PanelToggle(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, active: Boolean, accent: Color, onClick: () -> Unit) {
     IconButton(onClick = onClick) {
         Icon(icon, label, tint = if (active) accent else Jp.Text.copy(alpha = 0.75f))
+    }
+}
+
+/** Sovtimer: pausar efter en stund eller när låten är slut. */
+@Composable
+private fun SleepButton(p: se.jpfm.ui.PlayerConnection, accent: Color) {
+    var open by remember { mutableStateOf(false) }
+    val active = p.sleepEndsAt != null
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(active) {
+        while (active) {
+            now = System.currentTimeMillis()
+            kotlinx.coroutines.delay(15_000)
+        }
+    }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(Icons.Rounded.Timer, "Sovtimer", tint = if (active) accent else Jp.Text.copy(alpha = 0.75f))
+        }
+        val endsAt = p.sleepEndsAt
+        if (endsAt != null && !p.sleepAtTrackEnd) {
+            val min = ((endsAt - now) / 60_000 + 1).coerceAtLeast(1)
+            Text(
+                "$min",
+                style = MaterialTheme.typography.labelSmall,
+                color = Jp.Background,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .clip(CircleShape)
+                    .background(accent)
+                    .padding(horizontal = 5.dp, vertical = 1.dp),
+            )
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.background(Jp.SurfaceHigh)) {
+            listOf(15, 30, 45, 60, 90).forEach { m ->
+                DropdownMenuItem(text = { Text(if (m < 60) "$m minuter" else if (m == 60) "1 timme" else "1,5 timme") }, onClick = {
+                    p.setSleepTimer(m)
+                    open = false
+                })
+            }
+            DropdownMenuItem(text = { Text("När låten är slut") }, onClick = {
+                p.sleepAtEndOfTrack()
+                open = false
+            })
+            if (active) {
+                DropdownMenuItem(text = { Text("Stäng av sovtimern", color = Jp.Error) }, onClick = {
+                    p.setSleepTimer(null)
+                    open = false
+                })
+            }
+        }
     }
 }
 
